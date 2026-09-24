@@ -47,11 +47,12 @@ jobs:
           test -f "builds/$PROJECT_ID/app/src/main/AndroidManifest.xml"
       - name: Build release APK
         shell: bash
-        working-directory: builds/${{ inputs.project_id || github.ref_name }}
-        run: gradle :app:assembleRelease --stacktrace --no-daemon
+        run: |
+          cd "builds/$PROJECT_ID"
+          gradle :app:assembleRelease --stacktrace --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ inputs.project_id || github.ref_name }}
-          path: builds/${{ inputs.project_id || github.ref_name }}/app/build/outputs/apk/release/*.apk
+          name: apk-${{ env.PROJECT_ID }}
+          path: builds/${{ env.PROJECT_ID }}/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 3
