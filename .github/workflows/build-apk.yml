@@ -1,5 +1,10 @@
 name: Build APK
 on:
+  push:
+    branches:
+      - 'builder/**'
+    paths:
+      - 'builds/**/.build-trigger'
   workflow_dispatch:
     inputs:
       project_id:
@@ -7,11 +12,17 @@ on:
         type: string
 permissions:
   contents: read
+concurrency:
+  group: ai-app-builder-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -20,10 +31,27 @@ jobs:
         with:
           gradle-version: '8.9'
           cache-provider: basic
-      - run: cd builds/${{ inputs.project_id }} && gradle :app:assembleRelease --stacktrace --no-daemon
+      - name: Resolve project
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.project_id }}" ]; then
+            echo "PROJECT_ID=${{ inputs.project_id }}" >> "$GITHUB_ENV"
+          else
+            echo "PROJECT_ID=${GITHUB_REF_NAME#builder/}" >> "$GITHUB_ENV"
+          fi
+      - name: Verify project files
+        shell: bash
+        run: |
+          test -f "builds/$PROJECT_ID/settings.gradle.kts"
+          test -f "builds/$PROJECT_ID/app/build.gradle.kts"
+          test -f "builds/$PROJECT_ID/app/src/main/AndroidManifest.xml"
+      - name: Build release APK
+        shell: bash
+        working-directory: builds/${{ inputs.project_id || github.ref_name }}
+        run: gradle :app:assembleRelease --stacktrace --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: apk-${{ inputs.project_id }}
-          path: builds/${{ inputs.project_id }}/app/build/outputs/apk/release/*.apk
+          name: apk-${{ inputs.project_id || github.ref_name }}
+          path: builds/${{ inputs.project_id || github.ref_name }}/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 3
