@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#080a12"><title>AI App Builder — מפקודה ל־APK</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="glow g1"></div><div class="glow g2"></div>
+<header class="topbar">
+  <div class="brand"><div class="logo">✦</div><div><b>AI App Builder</b><span>מפקודה ל־APK</span></div></div>
+  <div class="top-actions"><span id="connectionPill" class="pill off">לא מחובר</span><button id="settingsBtn" class="icon">⚙</button></div>
+</header>
+<main class="shell">
+  <aside class="side">
+    <div class="side-title">WORKFLOW</div>
+    <div class="flow"><i>1</i><div><b>תיאור</b><small>הפקודה שלך</small></div></div><em></em>
+    <div class="flow"><i>2</i><div><b>AI</b><small>כתיבת הקוד</small></div></div><em></em>
+    <div class="flow"><i>3</i><div><b>Build</b><small>קומפילציה</small></div></div><em></em>
+    <div class="flow"><i>4</i><div><b>APK</b><small>הקובץ שלך</small></div></div>
+    <div class="tip"><strong>⚡ Build אמיתי</strong><p>הפרויקט נכתב ל־GitHub ומקופל עם Android SDK ו־Gradle ב־GitHub Actions.</p></div>
+  </aside>
+  <section class="main">
+    <div class="hero"><div class="eyebrow">ANDROID • AI • BUILD AUTOMATION</div><h1>תכתוב מה שאתה רוצה.<br><span>קבל APK.</span></h1><p>תיאור בעברית → קוד Android → קומפילציה → קובץ APK.</p></div>
+    <section class="card">
+      <div class="card-head"><div><h2>בנה אפליקציה חדשה</h2><p>פרט מסכים, כפתורים, שמירה מקומית והתנהגות. ה־AI יבנה את הקוד.</p></div><div class="live-dot"></div></div>
+      <label class="label">מה לבנות?</label>
+      <textarea id="prompt" maxlength="12000" placeholder="לדוגמה: בנה אפליקציית שעון מעורר יפה עם מסך ראשי, הוספת התראה, רשימת התראות פעילות, הפעלה וכיבוי ומצב כהה."></textarea>
+      <div class="chips"><button data-example="בנה מחשבון יפה עם חיבור, חיסור, כפל וחילוק">מחשבון</button><button data-example="בנה רשימת משימות עם הוספה, השלמה, מחיקה ושמירה מקומית">משימות</button><button data-example="בנה שעון דיגיטלי גדול עם שעה, תאריך ומעבר בין מצב בהיר לכהה">שעון</button><button data-example="בנה נגן מוזיקה מקומי עם רשימת שירים, חיפוש וכפתורי נגן">נגן</button></div>
+      <div class="under"><span>● Gradle + Android SDK מנוהלים אוטומטית</span><span id="count">0 / 12000</span></div>
+      <button id="buildBtn" class="build">✦ <span>בנה APK</span><b>←</b></button>
+      <div id="hint" class="hint">הגדר GitHub ו־Gemini דרך ⚙ לפני הבנייה.</div>
+    </section>
+    <section id="jobPanel" class="card job hidden">
+      <div class="job-head"><div><h2 id="jobTitle">בונה…</h2><p id="jobSubtitle">מתכונן</p></div><span id="jobStatus" class="jobpill">בתהליך</span></div>
+      <div class="bar"><div id="barFill"></div></div>
+      <div class="stages">
+        <div class="stage" data-stage="generating"><b>01</b><div><strong>AI</strong><small>מתכנן וכותב</small></div></div>
+        <div class="stage" data-stage="uploading"><b>02</b><div><strong>GitHub</strong><small>מעלה פרויקט</small></div></div>
+        <div class="stage" data-stage="building"><b>03</b><div><strong>Gradle</strong><small>מקמפל APK</small></div></div>
+        <div class="stage" data-stage="ready"><b>04</b><div><strong>APK</strong><small>מוכן להורדה</small></div></div>
+      </div>
+      <div id="jobResult"></div>
+      <details id="logsBox" class="logs hidden"><summary>לוג קומפילציה</summary><pre id="logs"></pre></details>
+    </section>
+  </section>
+</main>
+<dialog id="settingsDialog">
+<form id="settingsForm" class="dialog">
+  <div class="dialog-head"><div><h2>הגדרות חיבור</h2><p>המפתחות נשמרים בדפדפן שלך ולא נכתבים למסד נתונים.</p></div><button type="button" id="closeSettings" class="icon">×</button></div>
+  <label>GitHub Token<input id="githubToken" type="password" placeholder="github_pat_…"></label>
+  <label>Gemini API Key<input id="geminiKey" type="password" placeholder="AIza…"></label>
+  <div class="two"><label>Owner<input id="owner"></label><label>Repository<input id="repo"></label></div>
+  <div class="security">🔒 מומלץ להשתמש ב־Fine-grained token מוגבל למאגר BINH עם הרשאות Contents ו־Actions מתאימות.</div>
+  <div class="actions"><button type="button" id="testBtn" class="secondary">בדיקת חיבור</button><button class="primary">שמור</button></div>
+  <div id="testResult" class="test"></div>
+</form>
+</dialog>
+<script src="/app.js"></script>
+</body></html>
