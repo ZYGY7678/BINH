@@ -154,7 +154,57 @@ async function failureLogs(token,owner,repo,runId){
     return (await r.text()).slice(-16000);
   }catch{return ""}
 }
-async function buildAndWait(token,owner,repo,branch,id,job){
+
+async function askGeminiFix(key, userPrompt, files, logs) {
+  if(!key) throw new Error("חסר Gemini API Key");
+  const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent?key="+encodeURIComponent(key);
+  const system=[
+    "You are an Android build-fix agent.",
+    "Return JSON only with schema {files:[{path,content}],explanation}.",
+    "Fix ONLY the files under builds/PROJECT_ID/app/src/main/java/ and builds/PROJECT_ID/app/src/main/res/values/.",
+    "Do not change Gradle, manifest, wrapper, workflow or dependency files.",
+    "Preserve the requested app behavior and UI.",
+    "Use Kotlin/Jetpack Compose APIs compatible with the existing project.",
+    "Return complete replacement contents for every file you change.",
+    "Never return secrets, malware, credential theft or destructive behavior."
+  ].join(" ");
+  const context=files.map(f=>f.path+"\n---\n"+f.content).join("\n====\n");
+  const payload={
+    system_instruction:{parts:[{text:system}]},
+    contents:[{role:"user",parts:[{text:"PROJECT FILES:\n"+context+"\n\nGRADLE BUILD ERROR:\n"+logs.slice(-18000)+"\n\nFix the build failure. Return only changed source/resource files."}]}]},
+    generationConfig:{temperature:0.05,responseMimeType:"application/json"}
+  };
+  const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
+  const t=await r.text();
+  if(!r.ok) throw new Error("Gemini fix HTTP "+r.status);
+  const d=JSON.parse(t);
+  const raw=d?.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"";
+  try{return JSON.parse(raw)}catch{throw new Error("Gemini fix returned invalid JSON")}
+}
+async function applyFix(token,owner,repo,branch,id,job,key,logs){
+  const current=job.files.filter(f=>f.path.startsWith("builds/"+id+"/app/src/main/"));
+  const fix=await askGeminiFix(key,"",current,logs);
+  if(!Array.isArray(fix.files)||!fix.files.length) throw new Error("AI did not produce a fix");
+  const allowedRoot="builds/"+id+"/app/src/main/";
+  const changed=[];
+  for(const f of fix.files){
+    if(!f||typeof f.path!=="string"||typeof f.content!=="string") continue;
+    const q=f.path.replaceAll("\\\\","/").replace(/^\/+/,"");
+    const allowed=(q.startsWith(allowedRoot+"java/")||q.startsWith(allowedRoot+"res/values/"))&&(q.endsWith(".kt")||q.endsWith(".xml"))&&!q.includes("..");
+    if(!allowed||f.content.length>120000) continue;
+    const normalized=q.endsWith(".kt") && !/^package\s+/m.test(f.content)
+      ? (job.packageName?("package "+job.packageName+"\n\n"):"")+f.content : f.content;
+    const existing=job.files.find(x=>x.path===q);
+    if(existing) existing.content=normalized; else job.files.push({path:q,content:normalized});
+    await putFile(token,owner,repo,{path:q,content:normalized},branch);
+    changed.push(q);
+  }
+  if(!changed.length) throw new Error("AI fix contained no allowed files");
+  job.lastFix=fix.explanation||"AI applied a source-level build fix";
+  job.fixFiles=changed;
+}
+
+async function buildAndWait(token,owner,repo,branch,id,job,geminiKey){
   let run=null;
   for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch); if(!run) await wait(2000); }
   if(!run) throw new Error("GitHub Actions לא מצא את ההרצה");
@@ -162,13 +212,23 @@ async function buildAndWait(token,owner,repo,branch,id,job){
   for(let i=0;i<90;i++){
     const x=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs/"+run.id);
     if(x.status==="completed"){
-      if(x.conclusion!=="success"){ job.logs=await failureLogs(token,owner,repo,run.id); throw new Error("הקומפילציה נכשלה: "+x.conclusion); }
+      if(x.conclusion!=="success"){
+        job.logs=await failureLogs(token,owner,repo,run.id);
+        if((job.fixAttempts||0)<3 && geminiKey){
+          job.fixAttempts=(job.fixAttempts||0)+1;
+          job.status="fixing"; job.stage="AI מנתח את שגיאת Gradle — תיקון "+job.fixAttempts+"/3";
+          await applyFix(token,owner,repo,branch,id,job,geminiKey,job.logs);
+          await dispatch(token,owner,repo,branch,id);
+          return await buildAndWait(token,owner,repo,branch,id,job,geminiKey);
+        }
+        throw new Error("הקומפילציה נכשלה אחרי "+(job.fixAttempts||0)+" ניסיונות תיקון");
+      }
       const a=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs/"+run.id+"/artifacts");
       const z=(a.artifacts||[]).find(v=>v.name==="apk-"+id&&!v.expired);
       if(!z) throw new Error("APK artifact לא נמצא");
       job.artifactId=z.id; job.status="ready"; job.stage="APK מוכן להורדה"; return;
     }
-    job.status="building"; job.stage="Gradle מקמפל את ה־APK"; await wait(4000);
+    job.status="building"; job.stage=(job.fixAttempts||0)>0?"Gradle מקמפל אחרי תיקון "+job.fixAttempts+"/3":"Gradle מקמפל את ה־APK"; await wait(4000);
   }
   throw new Error("זמן הקומפילציה המקסימלי עבר");
 }
@@ -186,7 +246,7 @@ async function startJob(job,creds){
     for(const f of job.files) await putFile(creds.githubToken,job.owner,job.repo,f,branch);
     job.status="building"; job.stage="מפעיל קומפילציה ב־GitHub Actions";
     await dispatch(creds.githubToken,job.owner,job.repo,branch,job.id);
-    await buildAndWait(creds.githubToken,job.owner,job.repo,branch,job.id,job);
+    await buildAndWait(creds.githubToken,job.owner,job.repo,branch,job.id,job,creds.geminiKey);
   }catch(e){ job.status="failed"; job.error=e.message; }
 }
 async function route(req,res){
