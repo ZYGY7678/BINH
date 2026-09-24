@@ -1,1 +1,12 @@
-# AI App Builder\n\nמערכת Web שמקבלת פקודה בעברית, משתמשת ב-Gemini כדי לכתוב אפליקציית Android ב-Kotlin + Jetpack Compose, מעלה את הפרויקט ל-GitHub, מפעילה GitHub Actions ומחזירה APK להורדה.\n\n## ארכיטקטורה\nBrowser → Node.js → Gemini → GitHub branch → GitHub Actions → Gradle → APK artifact → Browser\n\n## חיבורים\nהאתר מבקש GitHub Fine-grained token ו-Gemini API key בדפדפן. הם נשמרים ב-localStorage ונשלחים רק בזמן בנייה. מומלץ להגביל את ה-GitHub token למאגר הבנייה.\n\n## Build engine\nהשרת משתמש בתבנית Android קבועה, כך שה-AI אינו משנה את Gradle או את ה-wrapper. קוד Kotlin ומשאבים מוזרקים לתבנית, GitHub Actions מקמפיל, וה-APK נשלף מה-artifact.\n
+# AI App Builder
+
+מערכת שממירה פקודה טבעית לפרויקט Android ב-Kotlin + Jetpack Compose, מעלה אותו ל-GitHub, מפעילה GitHub Actions ומחזירה APK.
+
+## חשוב
+- מאגר BINH כרגע ציבורי; ענפי builder כוללים את קוד האפליקציות שנוצרו.
+- המפתחות מוזנים בממשק ונשמרים מקומית בדפדפן; השרת מחזיק את ה-GitHub token בזיכרון של ה-job בלבד לצורך הורדת artifact.
+- יש להשתמש ב-Fine-grained GitHub token עם גישה למאגר BINH והרשאות מתאימות ל-Contents ול-Actions.
+- Render Free עשוי להירדם לאחר חוסר פעילות.
+
+## Build
+AGP 8.7.3 + Gradle 8.9 + Java 17 + compileSdk 35.
