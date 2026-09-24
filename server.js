@@ -35,21 +35,40 @@ const wait = ms => new Promise(r=>setTimeout(r,ms));
 
 async function github(token, endpoint, options={}) {
   if(!token) throw new Error("חסר GitHub Token");
-  const r=await fetch("https://api.github.com"+endpoint,{
-    ...options,
-    headers:{
-      "accept":"application/vnd.github+json",
-      "authorization":"Bearer "+token,
-      "x-github-api-version":"2022-11-28",
-      "user-agent":"AI-App-Builder/1.0",
-      ...(options.headers||{})
+  let lastError;
+  for(let attempt=0;attempt<3;attempt++){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),45000);
+    try{
+      const r=await fetch("https://api.github.com"+endpoint,{
+        ...options,
+        signal:controller.signal,
+        headers:{
+          "accept":"application/vnd.github+json",
+          "authorization":"Bearer "+token,
+          "x-github-api-version":"2022-11-28",
+          "user-agent":"AI-App-Builder/1.0",
+          ...(options.headers||{})
+        }
+      });
+      const t=await r.text();
+      let d={};
+      try{d=t?JSON.parse(t):{}}catch{d={raw:t}};
+      if(r.ok){clearTimeout(timer);return d;}
+      lastError=new Error(d.message||("GitHub HTTP "+r.status));
+      const retryable=r.status===429||r.status>=500;
+      clearTimeout(timer);
+      if(!retryable||attempt===2) throw lastError;
+      const retryAfter=Number(r.headers.get("retry-after")||0);
+      await wait(retryAfter>0?retryAfter*1000:Math.min(3000,500*(attempt+1)));
+    }catch(e){
+      clearTimeout(timer);
+      lastError=e;
+      if(attempt===2) throw e;
+      await wait(Math.min(3000,500*(attempt+1)));
     }
-  });
-  const t=await r.text();
-  let d={};
-  try{d=t?JSON.parse(t):{}}catch{d={raw:t}};
-  if(!r.ok) throw new Error(d.message||("GitHub HTTP "+r.status));
-  return d;
+  }
+  throw lastError||new Error("GitHub request failed");
 }
 
 async function askGemini(key, userPrompt) {
@@ -72,7 +91,11 @@ async function askGemini(key, userPrompt) {
   };
   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
   const t=await r.text();
-  if(!r.ok) throw new Error("Gemini HTTP "+r.status);
+  if(!r.ok){
+    let msg="Gemini HTTP "+r.status;
+    try{const ed=JSON.parse(t);if(ed?.error?.message)msg+=": "+ed.error.message;}catch{}
+    throw new Error(msg);
+  }
   const d=JSON.parse(t);
   const raw=d?.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"";
   if(!raw) throw new Error("Gemini did not return a result");
@@ -140,15 +163,17 @@ async function createBranch(token,owner,repo,branch){
     body:JSON.stringify({ref:"refs/heads/"+branch,sha:ref.object.sha})
   });
 }
-async function dispatch(token,owner,repo,branch,id){
-  await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{
-    method:"POST",headers:{"content-type":"application/json"},
-    body:JSON.stringify({ref:branch,inputs:{project_id:id}})
-  });
+async function triggerBuild(token,owner,repo,branch,id,job){
+  await putFile(token,owner,repo,{
+    path:"builds/"+id+"/.build-trigger",
+    content:JSON.stringify({id,triggeredAt:new Date().toISOString(),attempt:job.fixAttempts||0})
+  },branch);
 }
 async function latestRun(token,owner,repo,branch,afterRunId=null){
-  const d=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs?event=workflow_dispatch&branch="+encodeURIComponent(branch)+"&per_page=10");
-  return (d.workflow_runs||[]).find(x=>!afterRunId||x.id!==afterRunId)||null;
+  const d=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs?branch="+encodeURIComponent(branch)+"&per_page=20");
+  return (d.workflow_runs||[])
+    .filter(x=>!afterRunId||x.id!==afterRunId)
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
 }
 async function failureLogs(token,owner,repo,runId){
   try{
@@ -178,7 +203,7 @@ async function askGeminiFix(key, userPrompt, files, logs) {
   const context=files.map(f=>f.path+"\n---\n"+f.content).join("\n====\n");
   const payload={
     system_instruction:{parts:[{text:system}]},
-    contents:[{role:"user",parts:[{text:"PROJECT FILES:\n"+context+"\n\nGRADLE BUILD ERROR:\n"+logs.slice(-18000)+"\n\nFix the build failure. Return only changed source/resource files."}]}],
+    contents:[{role:"user",parts:[{text:"PROJECT FILES:\n"+context+"\n\nGRADLE BUILD ERROR:\n"+logs.slice(-18000)+"\n\nOriginal app request:\n"+(userPrompt||"Preserve the current app behavior visible in the project files.")+"\n\nFix the build failure. Return only changed files from the allowed paths."}]}],
     generationConfig:{temperature:0.05,responseMimeType:"application/json"}
   };
   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
@@ -189,8 +214,11 @@ async function askGeminiFix(key, userPrompt, files, logs) {
   try{return JSON.parse(raw)}catch{throw new Error("Gemini fix returned invalid JSON")}
 }
 async function applyFix(token,owner,repo,branch,id,job,key,logs){
-  const current=job.files.filter(f=>f.path.startsWith("builds/"+id+"/app/src/main/"));
-  const fix=await askGeminiFix(key,"",current,logs);
+  const current=job.files.filter(f=>
+    f.path.startsWith("builds/"+id+"/app/src/main/") ||
+    f.path==="builds/"+id+"/app/build.gradle.kts"
+  );
+  const fix=await askGeminiFix(key,job.prompt,current,logs);
   if(!Array.isArray(fix.files)||!fix.files.length) throw new Error("AI did not produce a fix");
   const allowedRoot="builds/"+id+"/app/src/main/";
   const changed=[];
@@ -199,8 +227,13 @@ async function applyFix(token,owner,repo,branch,id,job,key,logs){
     const q=f.path.replaceAll("\\\\","/").replace(/^\/+/,"");
     const allowed=(q.startsWith(allowedRoot+"java/")||q.startsWith(allowedRoot+"res/values/")||q===allowedRoot+"AndroidManifest.xml"||q==="builds/"+id+"/app/build.gradle.kts")&&(q.endsWith(".kt")||q.endsWith(".xml")||q.endsWith(".kts"))&&!q.includes("..");
     if(!allowed||f.content.length>120000) continue;
-    const normalized=q.endsWith(".kt") && !/^package\s+/m.test(f.content)
-      ? (job.packageName?("package "+job.packageName+"\n\n"):"")+f.content : f.content;
+    const normalized=q.endsWith(".kt")
+      ? (job.packageName
+          ? (/^package\s+[^\n]+/m.test(f.content)
+              ? f.content.replace(/^package\s+[^\n]+/m,"package "+job.packageName)
+              : "package "+job.packageName+"\n\n"+f.content)
+          : f.content)
+      : f.content;
     const existing=job.files.find(x=>x.path===q);
     if(existing) existing.content=normalized; else job.files.push({path:q,content:normalized});
     await putFile(token,owner,repo,{path:q,content:normalized},branch);
@@ -226,7 +259,7 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
           job.status="fixing"; job.stage="AI מנתח את שגיאת Gradle — תיקון "+job.fixAttempts+"/3";
           await applyFix(token,owner,repo,branch,id,job,geminiKey,job.logs);
           const previousRunId=run.id;
-          await dispatch(token,owner,repo,branch,id);
+          await triggerBuild(token,owner,repo,branch,id,job);
           return await buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRunId);
         }
         throw new Error("הקומפילציה נכשלה אחרי "+(job.fixAttempts||0)+" ניסיונות תיקון");
@@ -243,6 +276,10 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
 async function startJob(job,creds){
   try{
     job.status="generating"; job.stage="AI מתכנן וכותב את האפליקציה";
+    const repo=await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo);
+    if(repo.archived) throw new Error("המאגר ב-GitHub בארכיון");
+    if(repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
+    await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo+"/contents/.github/workflows/build-apk.yml?ref=main");
     const spec=await askGemini(creds.geminiKey,job.prompt);
     const pkg=cleanPackage(spec.packageName), name=safeName(spec.appName);
     const map=new Map(fixedFiles(job.id,name,pkg).map(x=>[x.path,x]));
@@ -250,12 +287,17 @@ async function startJob(job,creds){
     job.appName=name; job.packageName=pkg; job.summary=spec.summary||"";
     job.status="uploading"; job.stage="מעלה את הפרויקט ל־GitHub";
     const branch="builder/"+job.id; job.branch=branch; job.files=[...map.values()];
+    job.githubToken=creds.githubToken;
     await createBranch(creds.githubToken,job.owner,job.repo,branch);
     for(const f of job.files) await putFile(creds.githubToken,job.owner,job.repo,f,branch);
     job.status="building"; job.stage="מפעיל קומפילציה ב־GitHub Actions";
-    await dispatch(creds.githubToken,job.owner,job.repo,branch,job.id);
+    await triggerBuild(creds.githubToken,job.owner,job.repo,branch,job.id,job);
     await buildAndWait(creds.githubToken,job.owner,job.repo,branch,job.id,job,creds.geminiKey);
-  }catch(e){ job.status="failed"; job.error=e.message; }
+  }catch(e){
+    job.status="failed";
+    job.error=e.message;
+    job.stage="נכשל: "+e.message;
+  }
 }
 async function route(req,res){
   const u=new URL(req.url,"http://localhost");
