@@ -171,7 +171,7 @@ async function askGeminiFix(key, userPrompt, files, logs) {
   const context=files.map(f=>f.path+"\n---\n"+f.content).join("\n====\n");
   const payload={
     system_instruction:{parts:[{text:system}]},
-    contents:[{role:"user",parts:[{text:"PROJECT FILES:\n"+context+"\n\nGRADLE BUILD ERROR:\n"+logs.slice(-18000)+"\n\nFix the build failure. Return only changed source/resource files."}]}]},
+    contents:[{role:"user",parts:[{text:"PROJECT FILES:\n"+context+"\n\nGRADLE BUILD ERROR:\n"+logs.slice(-18000)+"\n\nFix the build failure. Return only changed source/resource files."}]}],
     generationConfig:{temperature:0.05,responseMimeType:"application/json"}
   };
   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
