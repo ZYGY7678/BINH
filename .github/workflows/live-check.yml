@@ -1,0 +1,18 @@
+name: Live Site Smoke
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/live-check.yml'
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check live site health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 8 --retry-all-errors --retry-delay 4 --max-time 30 https://ai-app-builder-qa64.onrender.com/api/health | tee /tmp/health.json
+          grep -q '"ok":true' /tmp/health.json
