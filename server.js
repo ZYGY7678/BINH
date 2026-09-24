@@ -168,8 +168,8 @@ async function askGeminiFix(key, userPrompt, files, logs) {
   const system=[
     "You are an Android build-fix agent.",
     "Return JSON only with schema {files:[{path,content}],explanation}.",
-    "Fix ONLY the files under builds/PROJECT_ID/app/src/main/java/ and builds/PROJECT_ID/app/src/main/res/values/.",
-    "Do not change Gradle, manifest, wrapper, workflow or dependency files.",
+    "Fix only files under builds/PROJECT_ID/app/src/main/java/, builds/PROJECT_ID/app/src/main/res/values/, builds/PROJECT_ID/app/src/main/AndroidManifest.xml, or builds/PROJECT_ID/app/build.gradle.kts.",
+    "Do not change root Gradle settings, Gradle wrapper, workflow files, or add arbitrary repositories. The app/build.gradle.kts file may be changed only to add or adjust standard AndroidX/Jetpack/Compose dependencies needed to fix the reported error.",
     "Preserve the requested app behavior and UI.",
     "Use Kotlin/Jetpack Compose APIs compatible with the existing project.",
     "Return complete replacement contents for every file you change.",
@@ -197,7 +197,7 @@ async function applyFix(token,owner,repo,branch,id,job,key,logs){
   for(const f of fix.files){
     if(!f||typeof f.path!=="string"||typeof f.content!=="string") continue;
     const q=f.path.replaceAll("\\\\","/").replace(/^\/+/,"");
-    const allowed=(q.startsWith(allowedRoot+"java/")||q.startsWith(allowedRoot+"res/values/"))&&(q.endsWith(".kt")||q.endsWith(".xml"))&&!q.includes("..");
+    const allowed=(q.startsWith(allowedRoot+"java/")||q.startsWith(allowedRoot+"res/values/")||q===allowedRoot+"AndroidManifest.xml"||q==="builds/"+id+"/app/build.gradle.kts")&&(q.endsWith(".kt")||q.endsWith(".xml")||q.endsWith(".kts"))&&!q.includes("..");
     if(!allowed||f.content.length>120000) continue;
     const normalized=q.endsWith(".kt") && !/^package\s+/m.test(f.content)
       ? (job.packageName?("package "+job.packageName+"\n\n"):"")+f.content : f.content;
