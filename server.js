@@ -121,10 +121,17 @@ function sanitizeFiles(id,spec,pkg){
   return out;
 }
 async function putFile(token,owner,repo,file,branch){
-  await github(token,"/repos/"+owner+"/"+repo+"/contents/"+encodeURI(file.path),{
-    method:"PUT",headers:{"content-type":"application/json"},
-    body:JSON.stringify({message:"AI App Builder: "+file.path,content:Buffer.from(file.content).toString("base64"),branch})
-  });
+  const endpoint="/repos/"+owner+"/"+repo+"/contents/"+encodeURI(file.path);
+  let sha;
+  try{
+    const existing=await github(token,endpoint+"?ref="+encodeURIComponent(branch));
+    sha=existing?.sha;
+  }catch(e){
+    if(!String(e.message||"").includes("Not Found")) throw e;
+  }
+  const body={message:"AI App Builder: "+file.path,content:Buffer.from(file.content).toString("base64"),branch};
+  if(sha) body.sha=sha;
+  await github(token,endpoint,{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
 }
 async function createBranch(token,owner,repo,branch){
   const ref=await github(token,"/repos/"+owner+"/"+repo+"/git/ref/heads/main");
@@ -139,9 +146,9 @@ async function dispatch(token,owner,repo,branch,id){
     body:JSON.stringify({ref:branch,inputs:{project_id:id}})
   });
 }
-async function latestRun(token,owner,repo,branch){
-  const d=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs?event=workflow_dispatch&branch="+encodeURIComponent(branch)+"&per_page=5");
-  return d.workflow_runs?.[0]||null;
+async function latestRun(token,owner,repo,branch,afterRunId=null){
+  const d=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs?event=workflow_dispatch&branch="+encodeURIComponent(branch)+"&per_page=10");
+  return (d.workflow_runs||[]).find(x=>!afterRunId||x.id!==afterRunId)||null;
 }
 async function failureLogs(token,owner,repo,runId){
   try{
@@ -204,9 +211,9 @@ async function applyFix(token,owner,repo,branch,id,job,key,logs){
   job.fixFiles=changed;
 }
 
-async function buildAndWait(token,owner,repo,branch,id,job,geminiKey){
+async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRunId=null){
   let run=null;
-  for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch); if(!run) await wait(2000); }
+  for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch,previousRunId); if(!run) await wait(2000); }
   if(!run) throw new Error("GitHub Actions לא מצא את ההרצה");
   job.runId=run.id; job.runUrl=run.html_url;
   for(let i=0;i<90;i++){
@@ -218,8 +225,9 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey){
           job.fixAttempts=(job.fixAttempts||0)+1;
           job.status="fixing"; job.stage="AI מנתח את שגיאת Gradle — תיקון "+job.fixAttempts+"/3";
           await applyFix(token,owner,repo,branch,id,job,geminiKey,job.logs);
+          const previousRunId=run.id;
           await dispatch(token,owner,repo,branch,id);
-          return await buildAndWait(token,owner,repo,branch,id,job,geminiKey);
+          return await buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRunId);
         }
         throw new Error("הקומפילציה נכשלה אחרי "+(job.fixAttempts||0)+" ניסיונות תיקון");
       }
