@@ -13,6 +13,9 @@ const DEFAULT_OWNER = process.env.GITHUB_OWNER || "ZYGY7678";
 const DEFAULT_REPO = process.env.GITHUB_REPO || "BINH";
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const jobs = new Map();
+const MAX_REQUEST_BYTES = 1500000;
+const MAX_PROMPT_LENGTH = 12000;
+const JOB_TTL_MS = 24 * 60 * 60 * 1000;
 
 function send(res, code, body, headers={}) {
   const b = Buffer.isBuffer(body) ? body : Buffer.from(body);
@@ -27,14 +30,41 @@ function json(res, code, data) {
 }
 function readBody(req) {
   return new Promise((resolve,reject)=>{
-    let s="";
+    const contentLength=Number(req.headers["content-length"]||0);
+    let s="", done=false;
+    const fail=e=>{
+      if(done)return;
+      done=true;
+      try{req.resume()}catch{}
+      reject(e);
+    };
+    if(Number.isFinite(contentLength)&&contentLength>MAX_REQUEST_BYTES){
+      return fail(new Error("Request too large"));
+    }
     req.setEncoding("utf8");
-    req.on("data", c=>{ s+=c; if(s.length>1500000) reject(new Error("Request too large")); });
-    req.on("end",()=>{ try{resolve(s?JSON.parse(s):{})}catch{reject(new Error("Invalid JSON"))} });
-    req.on("error",reject);
+    req.on("data", c=>{
+      if(done)return;
+      s+=c;
+      if(Buffer.byteLength(s,"utf8")>MAX_REQUEST_BYTES) fail(new Error("Request too large"));
+    });
+    req.on("end",()=>{
+      if(done)return;
+      done=true;
+      try{resolve(s?JSON.parse(s):{})}catch{reject(new Error("Invalid JSON"))}
+    });
+    req.on("error",fail);
   });
 }
 const wait = ms => new Promise(r=>setTimeout(r,ms));
+function pruneJobs(){
+  const cutoff=Date.now()-JOB_TTL_MS;
+  for(const [id,job] of jobs){
+    const created=Number(job.createdAt||0);
+    if(created&&created<cutoff&&(job.status==="ready"||job.status==="failed")) jobs.delete(id);
+  }
+}
+const pruneTimer=setInterval(pruneJobs,60*60*1000);
+pruneTimer.unref?.();
 
 async function github(token, endpoint, options={}) {
   if(!token) throw new Error("חסר GitHub Token");
@@ -127,7 +157,7 @@ function cleanPackage(v){
   const bits=raw.split(".").filter(Boolean).map(x=>/^[a-z_]/.test(x)?x:"app"+x);
   return bits.join(".")||"com.example.aiapp";
 }
-function safeName(v){ return String(v||"AI App").replace(/[<>]/g,"").trim().slice(0,50)||"AI App"; }
+function safeName(v){ return String(v||"AI App").replace(/[\u0000-\u001f\u007f<>:"/\\\\|?*]/g," ").replace(/\s+/g," ").trim().slice(0,50)||"AI App"; }
 function validRepoPart(v){ return /^[A-Za-z0-9_.-]{1,100}$/.test(String(v||"")); }
 function escXml(v){
   return String(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&apos;");
@@ -269,7 +299,7 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
   for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch,previousRunId,Math.max(0,(job.triggeredAt||Date.now())-15000)); if(!run) await wait(2000); }
   if(!run) throw new Error("GitHub Actions לא מצא את ההרצה");
   job.runId=run.id; job.runUrl=run.html_url;
-  for(let i=0;i<90;i++){
+  for(let i=0;i<240;i++){
     const x=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs/"+run.id);
     if(x.status==="completed"){
       if(x.conclusion!=="success"){
@@ -453,6 +483,7 @@ async function route(req,res){
     try{
       const b=await readBody(req);
       const prompt=String(b.prompt||"").trim();
+    if(prompt.length>MAX_PROMPT_LENGTH) throw new Error("הפקודה ארוכה מדי (מקסימום 12000 תווים)");
       const token=String(b.githubToken||"").trim();
       const geminiKey=String(b.geminiKey||"").trim();
       const owner=String(b.owner||DEFAULT_OWNER).trim();
