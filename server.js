@@ -20,7 +20,10 @@ function send(res, code, body, headers={}) {
   res.end(b);
 }
 function json(res, code, data) {
-  send(res, code, JSON.stringify(data), {"content-type":"application/json; charset=utf-8"});
+  send(res, code, JSON.stringify(data), {
+    "content-type":"application/json; charset=utf-8",
+    "cache-control":"no-store, max-age=0"
+  });
 }
 function readBody(req) {
   return new Promise((resolve,reject)=>{
@@ -107,6 +110,7 @@ function cleanPackage(v){
   return bits.join(".")||"com.example.aiapp";
 }
 function safeName(v){ return String(v||"AI App").replace(/[<>]/g,"").trim().slice(0,50)||"AI App"; }
+function validRepoPart(v){ return /^[A-Za-z0-9_.-]{1,100}$/.test(String(v||"")); }
 function escXml(v){
   return String(v).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&apos;");
 }
@@ -280,6 +284,51 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
   }
   throw new Error("זמן הקומפילציה המקסימלי עבר");
 }
+async function refreshRecoveredJob(job, token){
+  if(!job || !token) return job;
+  try{
+    let run=null;
+    if(job.runId){
+      run=await github(token,"/repos/"+job.owner+"/"+job.repo+"/actions/runs/"+job.runId);
+    }else{
+      run=await latestRun(token,job.owner,job.repo,job.branch,null,Math.max(0,(job.createdAt||Date.now())-15000));
+      if(run){ job.runId=run.id; job.runUrl=run.html_url; }
+    }
+    if(!run){
+      job.status="building";
+      job.stage="ממתין ל־GitHub Actions";
+      job.lastSyncedAt=Date.now();
+      return job;
+    }
+    if(run.status!=="completed"){
+      job.status="building";
+      job.stage=(run.status==="queued"||run.status==="waiting")?"ממתין ל־GitHub Actions":"Gradle מקמפל את ה־APK";
+    }else if(run.conclusion==="success"){
+      const a=await github(token,"/repos/"+job.owner+"/"+job.repo+"/actions/runs/"+run.id+"/artifacts");
+      const z=(a.artifacts||[]).find(v=>v.name==="apk-"+job.id&&!v.expired)||null;
+      if(z){
+        job.artifactId=z.id;
+        job.status="ready";
+        job.stage="APK מוכן להורדה";
+      }else{
+        job.status="uploading";
+        job.stage="הקומפילציה הסתיימה, ממתין לפרסום ה־APK";
+      }
+    }else{
+      job.status="failed";
+      job.stage="הקומפילציה נכשלה";
+      job.logs=await failureLogs(token,job.owner,job.repo,run.id);
+      job.error="הקומפילציה נכשלה ב־GitHub Actions";
+    }
+    job.lastSyncedAt=Date.now();
+    return job;
+  }catch(e){
+    job.lastSyncedAt=Date.now();
+    console.error("[RECOVERY_REFRESH] "+job.id+" "+e.message);
+    return job;
+  }
+}
+
 async function recoverJobFromGitHub(id,owner,repo,token){
   if(!token) return null;
   const branch="builder/"+id;
@@ -300,7 +349,7 @@ async function recoverJobFromGitHub(id,owner,repo,token){
     const sc=Buffer.from(s.content||"","base64").toString("utf8");
     appName=(sc.match(/<string\s+name="app_name">([^<]*)<\/string>/)||[])[1]||"AI App";
   }catch{}
-  const job={id,owner,repo,branch,appName,packageName,runId:run?.id||null,runUrl:run?.html_url||null,status:"uploading",stage:"GitHub מכיל את הפרויקט"};
+  const job={id,owner,repo,branch,appName,packageName,runId:run?.id||null,runUrl:run?.html_url||null,status:"building",stage:"ממתין ל־GitHub Actions",recovered:true,lastSyncedAt:Date.now(),createdAt:Date.now()};
   if(run){
     if(run.status!=="completed"){ job.status="building"; job.stage="Gradle מקמפל את ה־APK"; }
     else if(run.conclusion==="success"){
@@ -312,6 +361,7 @@ async function recoverJobFromGitHub(id,owner,repo,token){
       }catch{job.status="building";job.stage="ממתין לפרסום ה־APK";}
     }else{ job.status="failed"; job.stage="הקומפילציה נכשלה"; job.logs=await failureLogs(token,owner,repo,run.id); job.error="הקומפילציה נכשלה ב־GitHub Actions"; }
   }
+  job.lastSyncedAt=Date.now();
   return job;
 }
 
@@ -353,22 +403,43 @@ async function route(req,res){
   }
   if(req.method==="POST"&&u.pathname==="/api/build"){
     try{
-      const b=await readBody(req), prompt=String(b.prompt||"").trim();
+      const b=await readBody(req);
+      const prompt=String(b.prompt||"").trim();
+      const token=String(b.githubToken||"").trim();
+      const geminiKey=String(b.geminiKey||"").trim();
+      const owner=String(b.owner||DEFAULT_OWNER).trim();
+      const repo=String(b.repo||DEFAULT_REPO).trim();
       if(prompt.length<5) throw new Error("כתוב פקודה מפורטת יותר");
+      if(!token) throw new Error("חסר GitHub Token");
+      if(!geminiKey) throw new Error("חסר Gemini API Key");
+      if(!validRepoPart(owner)||!validRepoPart(repo)) throw new Error("Owner או Repository אינם תקינים");
+      const r=await github(token,"/repos/"+owner+"/"+repo);
+      if(r.archived) throw new Error("המאגר ב-GitHub בארכיון");
+      if(r?.permissions && !r.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
+      await github(token,"/repos/"+owner+"/"+repo+"/contents/.github/workflows/build-apk.yml?ref=main");
+      await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?per_page=1");
       const id=crypto.randomUUID().slice(0,8);
-      const job={id,prompt,owner:b.owner||DEFAULT_OWNER,repo:b.repo||DEFAULT_REPO,status:"queued",stage:"מתכונן",createdAt:Date.now()};
+      const job={id,prompt,owner,repo,status:"queued",stage:"מתכונן",createdAt:Date.now()};
       jobs.set(id,job);
-      void startJob(job,{githubToken:String(b.githubToken||""),geminiKey:String(b.geminiKey||"")});
+      console.log("[BUILD_REQUEST] id="+id+" repo="+owner+"/"+repo+" promptLen="+prompt.length);
+      void startJob(job,{githubToken:token,geminiKey});
       return json(res,202,{ok:true,jobId:id});
-    }catch(e){return json(res,400,{error:e.message})}
+    }catch(e){
+      console.error("[BUILD_REQUEST_FAILED] "+e.message);
+      return json(res,400,{error:e.message});
+    }
   }
   const m=u.pathname.match(/^\/api\/build\/([a-z0-9-]+)$/i);
   if(req.method==="GET"&&m){
+    const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"").trim();
+    const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER).trim();
+    const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO).trim();
     let j=jobs.get(m[1]);
+    if(j?.recovered && token && (!j.lastSyncedAt || Date.now()-j.lastSyncedAt>2500)){
+      j=await refreshRecoveredJob(j,token);
+      jobs.set(m[1],j);
+    }
     if(!j){
-      const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
-      const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER);
-      const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO);
       j=await recoverJobFromGitHub(m[1],owner,repo,token);
       if(j) jobs.set(m[1],j);
     }
@@ -378,10 +449,14 @@ async function route(req,res){
   const d=u.pathname.match(/^\/api\/build\/([a-z0-9-]+)\/download$/i);
   if(req.method==="GET"&&d){
     let j=jobs.get(d[1]);
-    const requestToken=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
+    const requestToken=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"").trim();
+    const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER).trim();
+    const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO).trim();
+    if(j?.recovered && requestToken){
+      j=await refreshRecoveredJob(j,requestToken);
+      jobs.set(d[1],j);
+    }
     if(!j){
-      const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER);
-      const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO);
       j=await recoverJobFromGitHub(d[1],owner,repo,requestToken);
       if(j) jobs.set(d[1],j);
     }
@@ -407,8 +482,14 @@ async function route(req,res){
     const use=fs.existsSync(file)&&!fs.statSync(file).isDirectory()?file:path.join(base,"index.html");
     const ext=path.extname(use);
     const types={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".css":"text/css; charset=utf-8"};
-    return send(res,200,fs.readFileSync(use),{"content-type":types[ext]||"application/octet-stream"});
+    return send(res,200,fs.readFileSync(use),{
+      "content-type":types[ext]||"application/octet-stream",
+      "cache-control":"no-store, max-age=0, must-revalidate"
+    });
   }
   return json(res,404,{error:"Not found"});
 }
-http.createServer((req,res)=>route(req,res).catch(e=>json(res,500,{error:e.message}))).listen(PORT,HOST,()=>console.log("AI App Builder on "+HOST+":"+PORT));
+http.createServer((req,res)=>route(req,res).catch(e=>{
+  console.error("[HTTP_UNHANDLED] "+req.method+" "+req.url+" "+e.message);
+  json(res,500,{error:"שגיאת שרת: "+e.message});
+})).listen(PORT,HOST,()=>console.log("AI App Builder on "+HOST+":"+PORT));
