@@ -25,7 +25,7 @@ jobs:
           SITE_URL: https://ai-app-builder-qa64.onrender.com
           TEST_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat > /tmp/e2e.mjs <<'EOF'
+          cat > e2e.mjs <<'EOF'
           import { chromium } from "playwright";
           import fs from "node:fs";
 
@@ -52,12 +52,13 @@ jobs:
 
           await page.locator("#settingsForm .primary").click();
           await page.locator("#prompt").fill("בנה אפליקציית בדיקה עם מסך אחד וכותרת E2E.");
-          await page.locator("#buildBtn").click();
-
-          const buildResponse = await page.waitForResponse(
-            r => r.url().endsWith("/api/build") && r.request().method() === "POST",
-            {timeout:30000}
-          );
+          const [buildResponse] = await Promise.all([
+            page.waitForResponse(
+              r => r.url().endsWith("/api/build") && r.request().method() === "POST",
+              {timeout:30000}
+            ),
+            page.locator("#buildBtn").click()
+          ]);
           const buildData = await buildResponse.json();
           if (!buildData.jobId) throw new Error("No jobId returned");
           fs.writeFileSync("/tmp/job-id", buildData.jobId);
@@ -82,7 +83,7 @@ jobs:
           console.log("BUTTON_E2E_OK jobId=" + buildData.jobId + " apkBytes=" + size + " run=" + runLink);
           await browser.close();
           EOF
-          node /tmp/e2e.mjs
+          node e2e.mjs
 
       - name: Cleanup test builder branch
         if: always()
