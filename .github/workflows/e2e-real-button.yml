@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - '.github/workflows/e2e-real-button.yml'
 
 permissions:
   contents: write
