@@ -218,7 +218,11 @@ async function askGeminiFix(key, userPrompt, files, logs) {
   };
   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
   const t=await r.text();
-  if(!r.ok) throw new Error("Gemini fix HTTP "+r.status);
+  if(!r.ok){
+    let msg="Gemini fix HTTP "+r.status;
+    try{const ed=JSON.parse(t);if(ed?.error?.message)msg+=": "+ed.error.message;}catch{}
+    throw new Error(msg);
+  }
   const d=JSON.parse(t);
   const raw=d?.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"";
   try{return JSON.parse(raw)}catch{throw new Error("Gemini fix returned invalid JSON")}
