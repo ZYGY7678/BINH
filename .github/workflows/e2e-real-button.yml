@@ -19,14 +19,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 90); do
-            if curl -fsS --max-time 20 https://ai-app-builder-qa64.onrender.com/api/health | grep -q '"ok":true'; then
-              echo 'Render is live'
+          for i in $(seq 1 120); do
+            HEALTH=$(curl -fsS --max-time 20 https://ai-app-builder-qa64.onrender.com/api/health || true)
+            if printf '%s' "$HEALTH" | grep -q '"e2eSmoke":true'; then
+              echo 'New E2E-enabled Render version is live'
               exit 0
             fi
             sleep 10
           done
-          echo 'Render did not become healthy in time'
+          echo 'New E2E-enabled Render version did not become live in time'
           exit 1
 
       - uses: actions/setup-node@v5
