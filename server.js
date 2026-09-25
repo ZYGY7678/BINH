@@ -178,10 +178,10 @@ async function createBranch(token,owner,repo,branch){
 }
 async function triggerBuild(token,owner,repo,branch,id,job){
   if(job?.e2e){
-    await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{
+    await github(token,"/repos/"+owner+"/"+repo+"/dispatches",{
       method:"POST",
       headers:{"content-type":"application/json"},
-      body:JSON.stringify({ref:branch,inputs:{project_id:id}})
+      body:JSON.stringify({event_type:"ai-builder-build",client_payload:{project_id:id,branch}})
     });
     return;
   }
