@@ -66,6 +66,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           JOB_ID="$(cat /tmp/job-id)"
+          export JOB_ID
           echo "JOB_ID=$JOB_ID"
 
           for i in $(seq 1 180); do
