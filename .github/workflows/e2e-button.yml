@@ -22,7 +22,7 @@ jobs:
 
       - name: Click the real site button and verify APK
         env:
-          SITE_URL: https://ai-app-builder-qa64.onrender.com
+          SITE_URL: https://ai-app-builder-e2e-test.onrender.com
           TEST_GITHUB_TOKEN: ${{ github.token }}
         run: |
           cat > e2e.mjs <<'EOF'
