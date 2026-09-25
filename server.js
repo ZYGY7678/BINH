@@ -177,6 +177,7 @@ async function createBranch(token,owner,repo,branch){
   });
 }
 async function triggerBuild(token,owner,repo,branch,id,job){
+  job.triggeredAt=Date.now();
   if(job?.e2e){
     await github(token,"/repos/"+owner+"/"+repo+"/dispatches",{
       method:"POST",
@@ -190,10 +191,14 @@ async function triggerBuild(token,owner,repo,branch,id,job){
     content:JSON.stringify({id,triggeredAt:new Date().toISOString(),attempt:job.fixAttempts||0})
   },branch);
 }
-async function latestRun(token,owner,repo,branch,afterRunId=null){
-  const d=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs?branch="+encodeURIComponent(branch)+"&per_page=20");
+async function latestRun(token,owner,repo,branch,afterRunId=null,e2e=false,sinceMs=0){
+  const endpoint=e2e
+    ? "/repos/"+owner+"/"+repo+"/actions/runs?per_page=50"
+    : "/repos/"+owner+"/"+repo+"/actions/runs?branch="+encodeURIComponent(branch)+"&per_page=20";
+  const d=await github(token,endpoint);
   return (d.workflow_runs||[])
     .filter(x=>!afterRunId||x.id!==afterRunId)
+    .filter(x=>!e2e || (x.event==="repository_dispatch" && (!sinceMs || new Date(x.created_at).getTime()>=sinceMs)))
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
 }
 async function failureLogs(token,owner,repo,runId){
@@ -267,7 +272,7 @@ async function applyFix(token,owner,repo,branch,id,job,key,logs){
 
 async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRunId=null){
   let run=null;
-  for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch,previousRunId); if(!run) await wait(2000); }
+  for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch,previousRunId,job.e2e,Math.max(0,(job.triggeredAt||Date.now())-15000)); if(!run) await wait(2000); }
   if(!run) throw new Error("GitHub Actions לא מצא את ההרצה");
   job.runId=run.id; job.runUrl=run.html_url;
   for(let i=0;i<90;i++){
