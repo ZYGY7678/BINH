@@ -179,10 +179,10 @@ async function createBranch(token,owner,repo,branch){
 async function triggerBuild(token,owner,repo,branch,id,job){
   job.triggeredAt=Date.now();
   if(job?.e2e){
-    await github(token,"/repos/"+owner+"/"+repo+"/dispatches",{
+    await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{
       method:"POST",
       headers:{"content-type":"application/json"},
-      body:JSON.stringify({event_type:"ai-builder-build",client_payload:{project_id:id,branch}})
+      body:JSON.stringify({ref:branch,inputs:{project_id:id}})
     });
     return;
   }
@@ -192,13 +192,12 @@ async function triggerBuild(token,owner,repo,branch,id,job){
   },branch);
 }
 async function latestRun(token,owner,repo,branch,afterRunId=null,e2e=false,sinceMs=0){
-  const endpoint=e2e
-    ? "/repos/"+owner+"/"+repo+"/actions/runs?per_page=50"
-    : "/repos/"+owner+"/"+repo+"/actions/runs?branch="+encodeURIComponent(branch)+"&per_page=20";
+  const endpoint="/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?branch="+encodeURIComponent(branch)+"&per_page=50";
   const d=await github(token,endpoint);
   return (d.workflow_runs||[])
     .filter(x=>!afterRunId||x.id!==afterRunId)
-    .filter(x=>!e2e || (x.event==="repository_dispatch" && (!sinceMs || new Date(x.created_at).getTime()>=sinceMs)))
+    .filter(x=>!e2e || x.event==="workflow_dispatch")
+    .filter(x=>!sinceMs || new Date(x.created_at).getTime()>=sinceMs)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
 }
 async function failureLogs(token,owner,repo,runId){
