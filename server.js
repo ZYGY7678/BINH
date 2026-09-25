@@ -297,6 +297,41 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
   }
   throw new Error("זמן הקומפילציה המקסימלי עבר");
 }
+async function downloadArtifactZip(token,owner,repo,artifactId){
+  let lastError;
+  for(let attempt=0;attempt<3;attempt++){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),60000);
+    try{
+      const r=await fetch("https://api.github.com/repos/"+owner+"/"+repo+"/actions/artifacts/"+artifactId+"/zip",{
+        signal:controller.signal,
+        headers:{
+          "accept":"application/vnd.github+json",
+          "authorization":"Bearer "+token,
+          "x-github-api-version":"2022-11-28",
+          "user-agent":"AI-App-Builder/1.0"
+        }
+      });
+      const t=r.ok?null:await r.text();
+      clearTimeout(timer);
+      if(!r.ok){
+        let msg="Artifact download HTTP "+r.status;
+        try{const d=JSON.parse(t);if(d?.message)msg+=": "+d.message;}catch{}
+        throw new Error(msg);
+      }
+      const data=Buffer.from(await r.arrayBuffer());
+      if(data.length<1024) throw new Error("Artifact response is unexpectedly small");
+      return data;
+    }catch(e){
+      clearTimeout(timer);
+      lastError=e.name==="AbortError"?new Error("Artifact download timed out"):e;
+      if(attempt===2) throw lastError;
+      await wait(Math.min(6000,1000*(attempt+1)));
+    }
+  }
+  throw lastError||new Error("Artifact download failed");
+}
+
 async function refreshRecoveredJob(job, token){
   if(!job || !token) return job;
   try{
@@ -304,7 +339,7 @@ async function refreshRecoveredJob(job, token){
     if(job.runId){
       run=await github(token,"/repos/"+job.owner+"/"+job.repo+"/actions/runs/"+job.runId);
     }else{
-      run=await latestRun(token,job.owner,job.repo,job.branch,null,Math.max(0,(job.createdAt||Date.now())-15000));
+      run=await latestRun(token,job.owner,job.repo,job.branch,null,0);
       if(run){ job.runId=run.id; job.runUrl=run.html_url; }
     }
     if(!run){
@@ -476,11 +511,8 @@ async function route(req,res){
     const token=requestToken||j?.githubToken;
     if(!j||j.status!=="ready")return json(res,404,{error:"APK not ready"});
     try{
-      const r=await fetch("https://api.github.com/repos/"+j.owner+"/"+j.repo+"/actions/artifacts/"+j.artifactId+"/zip",{
-        headers:{"accept":"application/vnd.github+json","authorization":"Bearer "+token,"x-github-api-version":"2022-11-28","user-agent":"AI-App-Builder/1.0"}
-      });
-      if(!r.ok) throw new Error("Artifact download HTTP "+r.status);
-      const zip=new AdmZip(Buffer.from(await r.arrayBuffer()));
+      const bytes=await downloadArtifactZip(token,j.owner,j.repo,j.artifactId);
+      const zip=new AdmZip(bytes);
       const apk=zip.getEntries().find(x=>x.entryName.toLowerCase().endsWith(".apk"));
       if(!apk) throw new Error("APK missing in artifact");
       const safe=safeName(j.appName).replace(/[^A-Za-z0-9_-]+/g,"-")||"AI-App";
