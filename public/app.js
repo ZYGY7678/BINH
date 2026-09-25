@@ -14,6 +14,34 @@ $("#testBtn").onclick=async()=>{const o=$("#testResult"),c=cfg();o.className="te
 let timer=null;
 function stage(s){document.querySelectorAll(".stage").forEach(x=>{x.classList.remove("active","done");if(s==="ready")x.classList.add("done");else if(s==="fixing"&&x.dataset.stage==="building")x.classList.add("active");else if(x.dataset.stage===s)x.classList.add("active")});const widths={queued:4,generating:25,uploading:50,fixing:82,building:76,ready:100,failed:100};$("#barFill").style.width=(widths[s]||8)+"%";}
 const pollErrors={};
+function esc(v){return String(v??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m]));}
+function renderEvents(events){
+  const box=$("#timeline");
+  if(!box)return;
+  box.replaceChildren();
+  const list=Array.isArray(events)?events:[];
+  $("#eventCount").textContent=list.length.toLocaleString("he-IL")+" אירועים";
+  for(const ev of list){
+    const row=document.createElement("article");
+    row.className="event "+(ev.type||"info");
+    const head=document.createElement("div"); head.className="event-head";
+    const title=document.createElement("strong"); title.textContent=ev.title||"אירוע";
+    const time=document.createElement("time"); time.textContent=new Date(ev.at||Date.now()).toLocaleTimeString("he-IL");
+    head.append(title,time);
+    const detail=document.createElement("div"); detail.className="event-detail"; detail.textContent=ev.detail||"";
+    row.append(head,detail);
+    if(ev.data){
+      const details=document.createElement("details"); details.className="event-data";
+      const summary=document.createElement("summary");
+      summary.textContent=ev.type==="ai"&&ev.title==="Gemini החזיר תשובה"?"הצג את תשובת Gemini":"הצג פרטים טכניים";
+      const pre=document.createElement("pre");
+      pre.textContent=typeof ev.data==="string"?ev.data:JSON.stringify(ev.data,null,2);
+      details.append(summary,pre); row.append(details);
+    }
+    box.append(row);
+  }
+  box.scrollTop=box.scrollHeight;
+}
 async function poll(id){
   if(!id)return;
   try{
@@ -30,6 +58,7 @@ async function poll(id){
     if(!r.ok)throw new Error(d.error||"לא נמצא");
     pollErrors[id]=0;
     $("#jobSubtitle").textContent=d.stage||"";
+    renderEvents(d.events);
     stage(d.status);
     $("#jobStatus").textContent=d.status==="ready"?"מוכן":d.status==="failed"?"נכשל":d.status==="fixing"?"מתקן":"בתהליך";
     if(d.status==="ready"){
@@ -130,6 +159,7 @@ buildBtn.onclick=async()=>{const c=cfg();if(!c.githubToken||!c.geminiKey){dialog
   const d=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(d.error||"לא ניתן להתחיל");
   localStorage.setItem(keys.job,d.jobId);
+  renderEvents([{at:Date.now(),type:"request",title:"הבקשה נשלחה",detail:"השרת קיבל את הבקשה ומתחיל את התהליך.",data:{prompt:p}}]);
   timer=setInterval(()=>poll(d.jobId),3000);
   poll(d.jobId)}catch(e){buildBtn.disabled=false;$("#jobSubtitle").textContent=e.message;stage("failed")}};
 load();
