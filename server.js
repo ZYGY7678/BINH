@@ -74,9 +74,34 @@ async function github(token, endpoint, options={}) {
   throw lastError||new Error("GitHub request failed");
 }
 
-async function askGemini(key, userPrompt) {
+async function geminiGenerate(key,payload){
   if(!key) throw new Error("חסר Gemini API Key");
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent?key="+encodeURIComponent(key);
+  let lastError;
+  for(let attempt=0;attempt<3;attempt++){
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),60000);
+    try{
+      const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload),signal:controller.signal});
+      const t=await r.text();
+      clearTimeout(timer);
+      if(r.ok)return JSON.parse(t);
+      let msg="Gemini HTTP "+r.status;
+      try{const ed=JSON.parse(t);if(ed?.error?.message)msg+=": "+ed.error.message;}catch{}
+      lastError=new Error(msg);
+      const retryable=r.status===429||r.status>=500;
+      if(!retryable||attempt===2)throw lastError;
+      await wait(Math.min(8000,1000*(attempt+1)));
+    }catch(e){
+      clearTimeout(timer);
+      lastError=e.name==="AbortError"?new Error("Gemini request timed out"):e;
+      if(attempt===2)throw lastError;
+      await wait(Math.min(8000,1000*(attempt+1)));
+    }
+  }
+  throw lastError||new Error("Gemini request failed");
+}
+async function askGemini(key, userPrompt) {
   const system=[
     "Generate Android apps in Kotlin with Jetpack Compose.",
     "Return JSON only.",
@@ -92,14 +117,7 @@ async function askGemini(key, userPrompt) {
     contents:[{role:"user",parts:[{text:"Build this app:\\n\\n"+userPrompt}]}],
     generationConfig:{temperature:0.2,responseMimeType:"application/json"}
   };
-  const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
-  const t=await r.text();
-  if(!r.ok){
-    let msg="Gemini HTTP "+r.status;
-    try{const ed=JSON.parse(t);if(ed?.error?.message)msg+=": "+ed.error.message;}catch{}
-    throw new Error(msg);
-  }
-  const d=JSON.parse(t);
+  const d=await geminiGenerate(key,payload);
   const raw=d?.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"";
   if(!raw) throw new Error("Gemini did not return a result");
   try{return JSON.parse(raw)}catch{throw new Error("Gemini returned invalid JSON")}
@@ -195,8 +213,6 @@ async function failureLogs(token,owner,repo,runId){
 }
 
 async function askGeminiFix(key, userPrompt, files, logs) {
-  if(!key) throw new Error("חסר Gemini API Key");
-  const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent?key="+encodeURIComponent(key);
   const system=[
     "You are an Android build-fix agent.",
     "Return JSON only with schema {files:[{path,content}],explanation}.",
@@ -213,10 +229,7 @@ async function askGeminiFix(key, userPrompt, files, logs) {
     contents:[{role:"user",parts:[{text:"PROJECT FILES:\n"+context+"\n\nGRADLE BUILD ERROR:\n"+logs.slice(-18000)+"\n\nOriginal app request:\n"+(userPrompt||"Preserve the current app behavior visible in the project files.")+"\n\nFix the build failure. Return only changed files from the allowed paths."}]}],
     generationConfig:{temperature:0.05,responseMimeType:"application/json"}
   };
-  const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
-  const t=await r.text();
-  if(!r.ok) throw new Error("Gemini fix HTTP "+r.status);
-  const d=JSON.parse(t);
+  const d=await geminiGenerate(key,payload);
   const raw=d?.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"";
   try{return JSON.parse(raw)}catch{throw new Error("Gemini fix returned invalid JSON")}
 }
