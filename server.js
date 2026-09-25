@@ -173,14 +173,23 @@ async function createBranch(token,owner,repo,branch){
 }
 async function triggerBuild(token,owner,repo,branch,id,job){
   job.triggeredAt=Date.now();
+  if(process.env.E2E_SMOKE_ENABLED==="1"){
+    await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{
+      method:"POST",
+      headers:{"content-type":"application/json"},
+      body:JSON.stringify({ref:branch,inputs:{project_id:id}})
+    });
+    return;
+  }
   const marker={path:".build-trigger",content:JSON.stringify({project_id:id,triggered_at:job.triggeredAt})};
   await putFile(token,owner,repo,marker,branch);
 }
 async function latestRun(token,owner,repo,branch,afterRunId=null,sinceMs=0){
   const endpoint="/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?branch="+encodeURIComponent(branch)+"&per_page=50";
   const d=await github(token,endpoint);
+  const event=process.env.E2E_SMOKE_ENABLED==="1"?"workflow_dispatch":"push";
   return (d.workflow_runs||[])
-    .filter(x=>x.event==="push")
+    .filter(x=>x.event===event)
     .filter(x=>!afterRunId||x.id!==afterRunId)
     .filter(x=>!sinceMs || new Date(x.created_at).getTime()>=sinceMs)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
