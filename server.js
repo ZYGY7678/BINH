@@ -531,7 +531,8 @@ async function route(req,res){
       await github(token,"/repos/"+owner+"/"+repo+"/contents/.github/workflows/build-apk.yml?ref=main");
       await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?per_page=1");
       const id=crypto.randomUUID().slice(0,8);
-      const now=Date.now();\n      const job={id,prompt,owner,repo,status:"queued",stage:"מתכונן",createdAt:now,events:[{at:now,type:"request",title:"הבקשה התקבלה",detail:"השרת קיבל את בקשת הבנייה ומכין את התהליך.",data:{prompt}}]};
+      const now=Date.now();
+      const job={id,prompt,owner,repo,status:"queued",stage:"מתכונן",createdAt:now,events:[{at:now,type:"request",title:"הבקשה התקבלה",detail:"השרת קיבל את בקשת הבנייה ומכין את התהליך.",data:{prompt}}]};
       jobs.set(id,job);
       console.log("[BUILD_REQUEST] id="+id+" repo="+owner+"/"+repo+" promptLen="+prompt.length);
       void startJob(job,{githubToken:token,geminiKey});
