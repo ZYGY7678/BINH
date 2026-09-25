@@ -135,7 +135,7 @@ function sanitizeFiles(id,spec,pkg){
     if(!f||typeof f.path!=="string"||typeof f.content!=="string") continue;
     let q=f.path.replaceAll("\\\\","/").replace(/^\/+/,"");
     if(q.includes("..")||q.includes("//")) continue;
-    if(q.startsWith("app/src/main/java/") && q.endsWith("/MainActivity.kt")) q="app/src/main/java/"+pkg.replaceAll(".","/")+"/MainActivity.kt";
+    if(q==="app/src/main/java/MainActivity.kt" || (q.startsWith("app/src/main/java/") && q.endsWith("/MainActivity.kt"))) q="app/src/main/java/"+pkg.replaceAll(".","/")+"/MainActivity.kt";
     const allowed=(q.startsWith("app/src/main/java/")||q.startsWith("app/src/main/res/values/")||q==="app/src/main/AndroidManifest.xml")&&(q.endsWith(".kt")||q.endsWith(".xml"));
     if(!allowed||seen.has(q)||f.content.length>120000) continue;
     let c=f.content;
