@@ -280,6 +280,41 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
   }
   throw new Error("זמן הקומפילציה המקסימלי עבר");
 }
+async function recoverJobFromGitHub(id,owner,repo,token){
+  if(!token) return null;
+  const branch="builder/"+id;
+  try{ await github(token,"/repos/"+owner+"/"+repo+"/git/ref/heads/"+encodeURIComponent(branch)); }catch{return null;}
+  let run=null;
+  try{
+    const d=await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?branch="+encodeURIComponent(branch)+"&per_page=20");
+    run=(d.workflow_runs||[]).filter(x=>x.event==="push").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
+  }catch{}
+  let appName="AI App", packageName="";
+  try{
+    const g=await github(token,"/repos/"+owner+"/"+repo+"/contents/"+encodeURI("builds/"+id+"/app/build.gradle.kts")+"?ref="+encodeURIComponent(branch));
+    const gc=Buffer.from(g.content||"","base64").toString("utf8");
+    packageName=(gc.match(/applicationId\s*=\s*"([^"]+)"/)||[])[1]||"";
+  }catch{}
+  try{
+    const s=await github(token,"/repos/"+owner+"/"+repo+"/contents/"+encodeURI("builds/"+id+"/app/src/main/res/values/strings.xml")+"?ref="+encodeURIComponent(branch));
+    const sc=Buffer.from(s.content||"","base64").toString("utf8");
+    appName=(sc.match(/<string\s+name="app_name">([^<]*)<\/string>/)||[])[1]||"AI App";
+  }catch{}
+  const job={id,owner,repo,branch,appName,packageName,runId:run?.id||null,runUrl:run?.html_url||null,status:"uploading",stage:"GitHub מכיל את הפרויקט"};
+  if(run){
+    if(run.status!=="completed"){ job.status="building"; job.stage="Gradle מקמפל את ה־APK"; }
+    else if(run.conclusion==="success"){
+      try{
+        const a=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs/"+run.id+"/artifacts");
+        const z=(a.artifacts||[]).find(v=>v.name==="apk-"+id&&!v.expired);
+        if(z){job.artifactId=z.id;job.status="ready";job.stage="APK מוכן להורדה";}
+        else {job.status="building";job.stage="הקומפילציה הסתיימה, ממתין לפרסום ה־APK";}
+      }catch{job.status="building";job.stage="ממתין לפרסום ה־APK";}
+    }else{ job.status="failed"; job.stage="הקומפילציה נכשלה"; job.logs=await failureLogs(token,owner,repo,run.id); job.error="הקומפילציה נכשלה ב־GitHub Actions"; }
+  }
+  return job;
+}
+
 async function startJob(job,creds){
   try{
     job.status="generating"; job.stage="AI מתכנן וכותב את האפליקציה";
@@ -329,15 +364,32 @@ async function route(req,res){
   }
   const m=u.pathname.match(/^\/api\/build\/([a-z0-9-]+)$/i);
   if(req.method==="GET"&&m){
-    const j=jobs.get(m[1]); if(!j)return json(res,404,{error:"Build not found"});
+    let j=jobs.get(m[1]);
+    if(!j){
+      const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
+      const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER);
+      const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO);
+      j=await recoverJobFromGitHub(m[1],owner,repo,token);
+      if(j) jobs.set(m[1],j);
+    }
+    if(!j)return json(res,404,{error:"Build not found"});
     const {files,githubToken,...safe}=j; return json(res,200,safe);
   }
   const d=u.pathname.match(/^\/api\/build\/([a-z0-9-]+)\/download$/i);
   if(req.method==="GET"&&d){
-    const j=jobs.get(d[1]); if(!j||j.status!=="ready")return json(res,404,{error:"APK not ready"});
+    let j=jobs.get(d[1]);
+    const requestToken=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"");
+    if(!j){
+      const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER);
+      const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO);
+      j=await recoverJobFromGitHub(d[1],owner,repo,requestToken);
+      if(j) jobs.set(d[1],j);
+    }
+    const token=requestToken||j?.githubToken;
+    if(!j||j.status!=="ready")return json(res,404,{error:"APK not ready"});
     try{
       const r=await fetch("https://api.github.com/repos/"+j.owner+"/"+j.repo+"/actions/artifacts/"+j.artifactId+"/zip",{
-        headers:{"accept":"application/vnd.github+json","authorization":"Bearer "+j.githubToken,"x-github-api-version":"2022-11-28","user-agent":"AI-App-Builder/1.0"}
+        headers:{"accept":"application/vnd.github+json","authorization":"Bearer "+token,"x-github-api-version":"2022-11-28","user-agent":"AI-App-Builder/1.0"}
       });
       if(!r.ok) throw new Error("Artifact download HTTP "+r.status);
       const zip=new AdmZip(Buffer.from(await r.arrayBuffer()));
