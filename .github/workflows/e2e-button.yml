@@ -54,20 +54,26 @@ jobs:
           if (!buildData.jobId) throw new Error("No jobId returned");
           fs.writeFileSync("/tmp/job-id", buildData.jobId);
 
-          await page.waitForFunction(
-            () => {
-              const s = document.querySelector("#jobStatus")?.textContent?.trim();
-              return s === "מוכן" || s === "נכשל";
-            },
-            null,
-            {timeout:180000, polling:2000}
-          );
+          let finalState = null;
+          for (let i = 0; i < 36; i++) {
+            const state = await page.evaluate(async (id) => {
+              const r = await fetch("/api/build/" + id, {cache:"no-store"});
+              return await r.json();
+            }, buildData.jobId);
+            console.log("SITE_JOB", JSON.stringify({
+              status: state.status,
+              stage: state.stage,
+              runId: state.runId ?? null,
+              artifactId: state.artifactId ?? null,
+              error: state.error ?? null
+            }));
+            finalState = state;
+            if (state.status === "ready" || state.status === "failed") break;
+            await page.waitForTimeout(5000);
+          }
 
-          const status = await page.locator("#jobStatus").textContent();
-          if (status?.trim() !== "מוכן") {
-            const subtitle = await page.locator("#jobSubtitle").textContent();
-            const error = await page.locator("#jobResult").textContent();
-            throw new Error("Build failed in site: " + (error || subtitle || status || "unknown"));
+          if (finalState?.status !== "ready") {
+            throw new Error("Build failed in site: " + (finalState?.error || finalState?.stage || finalState?.status || "unknown"));
           }
 
           const runLink = await page.locator('a[href*="github.com"]').getAttribute("href");
