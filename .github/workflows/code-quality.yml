@@ -1,0 +1,64 @@
+name: Code Quality and Production Smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Validate JavaScript
+        run: |
+          node --check server.js
+          node --check public/app.js
+
+      - name: Validate workflow YAML
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/build-apk.yml"); puts "build-apk.yml OK"'
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/code-quality.yml"); puts "code-quality.yml OK"'
+
+      - name: Check whitespace errors
+        run: git diff --check
+
+      - name: Production health smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE="https://ai-app-builder-qa64.onrender.com"
+
+          curl --fail --silent --show-error --location --max-time 120 --retry 2 --retry-delay 3 "$SITE/api/health" -o /tmp/health.json
+          node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/health.json","utf8")); if(!d.ok) process.exit(1); console.log("HEALTH_OK", d.repo, d.model);'
+
+          curl --fail --silent --show-error --location --max-time 120 --retry 2 --retry-delay 3 "$SITE/" -o /tmp/index.html
+          grep -Fq 'app.js?v=20260925-4' /tmp/index.html
+          echo "INDEX_CACHE_VERSION_OK"
+
+          curl --fail --silent --show-error --location --max-time 120 --retry 2 --retry-delay 3 "$SITE/app.js?v=20260925-4" -o /tmp/app.js
+          grep -Fq 'aib_last_job' /tmp/app.js
+          grep -Fq 'cache:"no-store"' /tmp/app.js
+          echo "FRONTEND_VERSION_OK"
+
+          code="$(curl --silent --show-error --location --max-time 120 --retry 2 --retry-delay 3 -o /tmp/build-preflight.json -w '%{http_code}' \
+            -X POST "$SITE/api/build" \
+            -H 'content-type: application/json' \
+            --data '{"prompt":"smoke"}')"
+          test "$code" = "400"
+          node -e 'const fs=require("fs"); const d=JSON.parse(fs.readFileSync("/tmp/build-preflight.json","utf8")); if(!String(d.error||"").includes("GitHub Token")) process.exit(1); console.log("BUILD_PREFLIGHT_OK");'
+
+          echo "PRODUCTION_SMOKE_OK"
