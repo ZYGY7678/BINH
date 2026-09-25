@@ -2,7 +2,7 @@ name: Temporary Production Button E2E
 on:
   push:
     branches:
-      - main
+      - e2e-production-test
     paths:
       - '.e2e-trigger'
 permissions:
