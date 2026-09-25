@@ -279,9 +279,13 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
         }
         throw new Error("הקומפילציה נכשלה אחרי "+(job.fixAttempts||0)+" ניסיונות תיקון");
       }
-      const a=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs/"+run.id+"/artifacts");
-      const z=(a.artifacts||[]).find(v=>v.name==="apk-"+id&&!v.expired);
-      if(!z) throw new Error("APK artifact לא נמצא");
+      let z=null;
+      for(let attempt=0;attempt<12&&!z;attempt++){
+        const a=await github(token,"/repos/"+owner+"/"+repo+"/actions/runs/"+run.id+"/artifacts");
+        z=(a.artifacts||[]).find(v=>v.name==="apk-"+id&&!v.expired)||null;
+        if(!z) await wait(5000);
+      }
+      if(!z) throw new Error("APK artifact לא נמצא לאחר המתנה לפרסום ב-GitHub");
       job.artifactId=z.id; job.status="ready"; job.stage="APK מוכן להורדה"; return;
     }
     job.status="building"; job.stage=(job.fixAttempts||0)>0?"Gradle מקמפל אחרי תיקון "+job.fixAttempts+"/3":"Gradle מקמפל את ה־APK"; await wait(4000);
