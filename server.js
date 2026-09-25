@@ -334,7 +334,12 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
       addEvent(job,"apk","ה־APK מוכן","GitHub פרסם artifact וה־APK זמין להורדה.",{artifactId:z.id,artifactName:z.name,size:z.size_in_bytes||0});
       return;
     }
-    job.status="building"; job.stage=(job.fixAttempts||0)>0?"Gradle מקמפל אחרי תיקון "+job.fixAttempts+"/3":"Gradle מקמפל את ה־APK"; await wait(4000);
+    job.status="building"; job.stage=(job.fixAttempts||0)>0?"Gradle מקמפל אחרי תיקון "+job.fixAttempts+"/3":"Gradle מקמפל את ה־APK";
+    if(job.lastBuildStage!==job.stage){
+      job.lastBuildStage=job.stage;
+      addEvent(job,"build","GitHub Actions בבנייה",job.stage,{runId:run.id,runUrl:run.html_url,githubStatus:x.status});
+    }
+    await wait(4000);
   }
   throw new Error("זמן הקומפילציה המקסימלי עבר");
 }
@@ -392,6 +397,10 @@ async function refreshRecoveredJob(job, token){
     if(run.status!=="completed"){
       job.status="building";
       job.stage=(run.status==="queued"||run.status==="waiting")?"ממתין ל־GitHub Actions":"Gradle מקמפל את ה־APK";
+      if(job.lastBuildStage!==job.stage){
+        job.lastBuildStage=job.stage;
+        addEvent(job,"build","סטטוס GitHub Actions השתנה",job.stage,{runId:run.id,runUrl:run.html_url,githubStatus:run.status});
+      }
     }else if(run.conclusion==="success"){
       const a=await github(token,"/repos/"+job.owner+"/"+job.repo+"/actions/runs/"+run.id+"/artifacts");
       const z=(a.artifacts||[]).find(v=>v.name==="apk-"+job.id&&!v.expired)||null;
