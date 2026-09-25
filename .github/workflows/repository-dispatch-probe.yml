@@ -1,0 +1,21 @@
+name: Repository Dispatch Probe
+
+on:
+  repository_dispatch:
+    types:
+      - ai-builder-build
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm dispatch payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${{ github.event.client_payload.project_id }}"
+          test -n "${{ github.event.client_payload.branch }}"
+          echo "repository_dispatch received project_id=${{ github.event.client_payload.project_id }} branch=${{ github.event.client_payload.branch }}"
