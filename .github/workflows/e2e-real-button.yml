@@ -99,23 +99,6 @@ jobs:
           }
           if (!state?.branch) throw new Error('Site never exposed the created builder branch');
 
-          const dispatch = await page.evaluate(async ({token, branch, jobId}) => {
-            const r = await fetch('https://api.github.com/repos/ZYGY7678/BINH/actions/workflows/build-apk.yml/dispatches', {
-              method: 'POST',
-              headers: {
-                'Accept': 'application/vnd.github+json',
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + token,
-                'X-GitHub-Api-Version': '2022-11-28'
-              },
-              body: JSON.stringify({ref: branch, inputs: {project_id: jobId}})
-            });
-            return {status:r.status, body:await r.text()};
-          }, {token:process.env.GITHUB_TOKEN, branch:state.branch, jobId});
-          if (dispatch.status !== 204) {
-            throw new Error('GitHub workflow dispatch failed: HTTP ' + dispatch.status + ' ' + dispatch.body);
-          }
-
           const deadline = Date.now() + 15 * 60 * 1000;
           while (Date.now() < deadline) {
             state = await page.evaluate(async (id) => {
@@ -124,8 +107,7 @@ jobs:
             }, jobId);
             if (state.runId) break;
             if (state.status === 'failed' && !state.runId) {
-              await page.waitForTimeout(3000);
-              continue;
+              throw new Error('Site build failed before workflow started: ' + (state.error || state.stage || 'unknown error'));
             }
             await page.waitForTimeout(3000);
           }
