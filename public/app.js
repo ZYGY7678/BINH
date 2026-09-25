@@ -107,11 +107,20 @@ async function poll(id){
     if(pollErrors[id]>=4){
       clearInterval(timer);buildBtn.disabled=false;
       $("#jobTitle").textContent="לא ניתן לקבל את מצב הבנייה";
-      $("#jobResult").innerHTML='<div class="error"><div class="result-title">חיבור לשרת נכשל</div><div class="result-meta">בדוק את החיבור ואת הגדרות GitHub/Gemini ונסה שוב.</div></div>';
+      const result=document.createElement("div");
+      result.className="error";
+      const title=document.createElement("div");
+      title.className="result-title";
+      title.textContent="חיבור לשרת נכשל";
+      const meta=document.createElement("div");
+      meta.className="result-meta";
+      meta.textContent="בדוק את החיבור ואת הגדרות GitHub/Gemini ונסה שוב.";
+      result.append(title,meta);
+      $("#jobResult").replaceChildren(result);
     }
   }
 }
-buildBtn.onclick=async()=>{const c=cfg();if(!c.githubToken||!c.geminiKey){dialog.showModal();return}const p=promptEl.value.trim();if(p.length<5){promptEl.focus();return}clearInterval(timer);timer=null;buildBtn.disabled=true;$("#jobPanel").classList.remove("hidden");$("#jobTitle").textContent="בונה את האפליקציה…";$("#jobResult").innerHTML="";$("#logsBox").classList.add("hidden");stage("queued");try{
+buildBtn.onclick=async()=>{const c=cfg();if(!c.githubToken||!c.geminiKey){dialog.showModal();return}const p=promptEl.value.trim();if(p.length<5){promptEl.focus();return}clearInterval(timer);timer=null;buildBtn.disabled=true;$("#jobPanel").classList.remove("hidden");$("#jobTitle").textContent="בונה את האפליקציה…";$("#jobResult").replaceChildren();$("#logsBox").classList.add("hidden");stage("queued");try{
   const r=await fetch("/api/build",{
     method:"POST",
     cache:"no-store",
