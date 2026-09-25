@@ -447,7 +447,9 @@ async function recoverJobFromGitHub(id,owner,repo,token){
     const sc=Buffer.from(s.content||"","base64").toString("utf8");
     appName=(sc.match(/<string\s+name="app_name">([^<]*)<\/string>/)||[])[1]||"AI App";
   }catch{}
-  const recoveredAt=Date.now();\n  const events=[{at:recoveredAt,type:"github",title:"הבנייה שוחזרה מ־GitHub",detail:"נתוני הבנייה נטענו מחדש מ־GitHub Actions.",data:{branch,runId:run?.id||null,runUrl:run?.html_url||null}}];\n  const job={id,owner,repo,branch,appName,packageName,runId:run?.id||null,runUrl:run?.html_url||null,status:"building",stage:"ממתין ל־GitHub Actions",recovered:true,lastSyncedAt:recoveredAt,createdAt:recoveredAt,events};
+  const recoveredAt=Date.now();
+  const events=[{at:recoveredAt,type:"github",title:"הבנייה שוחזרה מ־GitHub",detail:"נתוני הבנייה נטענו מחדש מ־GitHub Actions.",data:{branch,runId:run?.id||null,runUrl:run?.html_url||null}}];
+  const job={id,owner,repo,branch,appName,packageName,runId:run?.id||null,runUrl:run?.html_url||null,status:"building",stage:"ממתין ל־GitHub Actions",recovered:true,lastSyncedAt:recoveredAt,createdAt:recoveredAt,events};
   if(run){
     if(run.status!=="completed"){ job.status="building"; job.stage="Gradle מקמפל את ה־APK"; }
     else if(run.conclusion==="success"){
