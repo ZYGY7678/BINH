@@ -35,6 +35,29 @@ jobs:
 
       - name: Check whitespace errors
         run: git diff --check
+      - name: Assert hardening invariants
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require("fs");
+          const server=fs.readFileSync("server.js","utf8");
+          const app=fs.readFileSync("public/app.js","utf8");
+          const workflow=fs.readFileSync(".github/workflows/build-apk.yml","utf8");
+          const checks=[
+            [server.includes('path:".build-trigger"'),"server trigger path"],
+            [workflow.includes("'.build-trigger'"),"workflow trigger path"],
+            [server.includes("MAX_REQUEST_BYTES = 1500000"),"request body cap"],
+            [server.includes("MAX_PROMPT_LENGTH = 12000"),"prompt cap"],
+            [server.includes("for(let i=0;i<240;i++)"),"extended build wait"],
+            [server.includes("recoverJobFromGitHub")&&server.includes("refreshRecoveredJob"),"recovery"],
+            [!app.includes("innerHTML"),"no innerHTML"],
+            [app.includes('cache:"no-store"'),"frontend no-store"],
+            [app.includes("aib_last_job"),"job resume storage"]
+          ];
+          for(const [ok,name] of checks) if(!ok) throw new Error("Hardening invariant failed: "+name);
+          console.log("HARDENING_INVARIANTS_OK");
+          NODE
+
 
       - name: Production health smoke test
         shell: bash
