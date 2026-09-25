@@ -16,6 +16,14 @@ const jobs = new Map();
 const MAX_REQUEST_BYTES = 1500000;
 const MAX_PROMPT_LENGTH = 12000;
 const JOB_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_EVENT_TEXT = 24000;
+function addEvent(job,type,title,detail="",data=null){
+  if(!job.events) job.events=[];
+  const event={at:Date.now(),type,title,detail:String(detail||"").slice(0,MAX_EVENT_TEXT)};
+  if(data!==null) event.data=data;
+  job.events.push(event);
+  if(job.events.length>200) job.events=job.events.slice(-200);
+}
 
 function send(res, code, body, headers={}) {
   const b = Buffer.isBuffer(body) ? body : Buffer.from(body);
@@ -304,6 +312,7 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
     if(x.status==="completed"){
       if(x.conclusion!=="success"){
         job.logs=await failureLogs(token,owner,repo,run.id);
+        addEvent(job,"github","GitHub Actions נכשל","התקבלה תוצאת כישלון מה־workflow.",{runId:run.id,runUrl:run.html_url,logs:job.logs.slice(-12000)});
         if((job.fixAttempts||0)<3 && geminiKey){
           job.fixAttempts=(job.fixAttempts||0)+1;
           job.status="fixing"; job.stage="AI מנתח את שגיאת Gradle — תיקון "+job.fixAttempts+"/3";
@@ -321,7 +330,9 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
         if(!z) await wait(5000);
       }
       if(!z) throw new Error("APK artifact לא נמצא לאחר המתנה לפרסום ב-GitHub");
-      job.artifactId=z.id; job.status="ready"; job.stage="APK מוכן להורדה"; return;
+      job.artifactId=z.id; job.status="ready"; job.stage="APK מוכן להורדה";
+      addEvent(job,"apk","ה־APK מוכן","GitHub פרסם artifact וה־APK זמין להורדה.",{artifactId:z.id,artifactName:z.name,size:z.size_in_bytes||0});
+      return;
     }
     job.status="building"; job.stage=(job.fixAttempts||0)>0?"Gradle מקמפל אחרי תיקון "+job.fixAttempts+"/3":"Gradle מקמפל את ה־APK"; await wait(4000);
   }
@@ -445,25 +456,36 @@ async function recoverJobFromGitHub(id,owner,repo,token){
 
 async function startJob(job,creds){
   try{
+    addEvent(job,"request","הבקשה התקבלה","השרת קיבל את בקשת הבנייה.",{prompt:job.prompt});
     job.status="generating"; job.stage="AI מתכנן וכותב את האפליקציה";
+    addEvent(job,"ai","נשלחת בקשה ל־Gemini","השרת שולח את תיאור האפליקציה למודל "+MODEL,{model:MODEL,prompt:job.prompt});
     const repo=await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo);
     if(repo.archived) throw new Error("המאגר ב-GitHub בארכיון");
     if(repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
     await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo+"/contents/.github/workflows/build-apk.yml?ref=main");
     const spec=await askGemini(creds.geminiKey,job.prompt);
     const pkg=cleanPackage(spec.packageName), name=safeName(spec.appName);
+    addEvent(job,"ai","Gemini החזיר תשובה","התקבלה תשובת JSON עם מפרט וקבצי קוד.",{
+      appName:name,packageName:pkg,summary:String(spec.summary||""),
+      files:Array.isArray(spec.files)?spec.files.map(x=>({path:x.path,size:String(x.content||"").length})):[],
+      response:JSON.stringify(spec).slice(0,MAX_EVENT_TEXT)
+    });
     const map=new Map(fixedFiles(job.id,name,pkg).map(x=>[x.path,x]));
     for(const f of sanitizeFiles(job.id,spec,pkg)) map.set(f.path,f);
     job.appName=name; job.packageName=pkg; job.summary=spec.summary||"";
     job.status="uploading"; job.stage="מעלה את הפרויקט ל־GitHub";
     const branch="builder/"+job.id; job.branch=branch; job.files=[...map.values()];
     job.githubToken=creds.githubToken;
+    addEvent(job,"github","נוצר ענף GitHub","הפרויקט מוכן להעלאה לענף "+branch,{branch});
     await createBranch(creds.githubToken,job.owner,job.repo,branch);
+    addEvent(job,"github","מעלה קבצים ל־GitHub","מעלה "+job.files.length+" קבצים לענף "+branch,{branch,files:job.files.map(x=>({path:x.path,size:x.content.length}))});
     for(const f of job.files) await putFile(creds.githubToken,job.owner,job.repo,f,branch);
     job.status="building"; job.stage="מפעיל קומפילציה ב־GitHub Actions";
+    addEvent(job,"github","מפעיל GitHub Actions","נשלח trigger ל־Build APK.",{branch,workflow:".github/workflows/build-apk.yml"});
     await triggerBuild(creds.githubToken,job.owner,job.repo,branch,job.id,job);
     await buildAndWait(creds.githubToken,job.owner,job.repo,branch,job.id,job,creds.geminiKey);
   }catch(e){
+    addEvent(job,"error","התהליך נכשל",e.message);
     job.status="failed";
     job.error=e.message;
     job.stage="נכשל: "+e.message;
