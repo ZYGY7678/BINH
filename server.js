@@ -299,7 +299,7 @@ async function startJob(job,creds){
     job.status="generating"; job.stage="AI מתכנן וכותב את האפליקציה";
     const repo=await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo);
     if(repo.archived) throw new Error("המאגר ב-GitHub בארכיון");
-    if(repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
+    if(!job.e2e && repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
     await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo+"/contents/.github/workflows/build-apk.yml?ref=main");
     const spec=(job.e2e&&E2E_SMOKE_ENABLED)?smokeSpec():await askGemini(creds.geminiKey,job.prompt);
     const pkg=cleanPackage(spec.packageName), name=safeName(spec.appName);
