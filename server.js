@@ -72,9 +72,6 @@ async function github(token, endpoint, options={}) {
 }
 
 async function askGemini(key, userPrompt) {
-  if(process.env.E2E_SMOKE_ENABLED==="1" && key==="E2E_TEST") {
-    return {appName:"E2E Test App",packageName:"com.zygy.e2etest",summary:"Deterministic end-to-end test app.",files:[{path:"app/src/main/java/MainActivity.kt",content:`package com.zygy.e2etest\n\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.material3.MaterialTheme\nimport androidx.compose.material3.Surface\nimport androidx.compose.material3.Text\n\nclass MainActivity : ComponentActivity() {\n  override fun onCreate(state: Bundle?) { super.onCreate(state); setContent { MaterialTheme { Surface { Text("E2E test OK") } } } }\n}\n`}]};
-  }
   if(!key) throw new Error("חסר Gemini API Key");
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent?key="+encodeURIComponent(key);
   const system=[
@@ -169,19 +166,14 @@ async function createBranch(token,owner,repo,branch){
 }
 async function triggerBuild(token,owner,repo,branch,id,job){
   job.triggeredAt=Date.now();
-  if(process.env.E2E_SMOKE_ENABLED==="1"){
-    await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({ref:branch,inputs:{project_id:id}})});
-    return;
-  }
   const marker={path:".build-trigger",content:JSON.stringify({project_id:id,triggered_at:job.triggeredAt})};
   await putFile(token,owner,repo,marker,branch);
 }
 async function latestRun(token,owner,repo,branch,afterRunId=null,sinceMs=0){
   const endpoint="/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?branch="+encodeURIComponent(branch)+"&per_page=50";
   const d=await github(token,endpoint);
-  const event=process.env.E2E_SMOKE_ENABLED==="1"?"workflow_dispatch":"push";
   return (d.workflow_runs||[])
-    .filter(x=>x.event===event)
+    .filter(x=>x.event==="push")
     .filter(x=>!afterRunId||x.id!==afterRunId)
     .filter(x=>!sinceMs || new Date(x.created_at).getTime()>=sinceMs)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
@@ -219,11 +211,7 @@ async function askGeminiFix(key, userPrompt, files, logs) {
   };
   const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});
   const t=await r.text();
-  if(!r.ok){
-    let msg="Gemini fix HTTP "+r.status;
-    try{const ed=JSON.parse(t);if(ed?.error?.message)msg+=": "+ed.error.message;}catch{}
-    throw new Error(msg);
-  }
+  if(!r.ok) throw new Error("Gemini fix HTTP "+r.status);
   const d=JSON.parse(t);
   const raw=d?.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"";
   try{return JSON.parse(raw)}catch{throw new Error("Gemini fix returned invalid JSON")}
@@ -297,7 +285,7 @@ async function startJob(job,creds){
     job.status="generating"; job.stage="AI מתכנן וכותב את האפליקציה";
     const repo=await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo);
     if(repo.archived) throw new Error("המאגר ב-GitHub בארכיון");
-    if(repo?.permissions && !repo.permissions.push && process.env.E2E_SMOKE_ENABLED!=="1") throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
+    if(repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
     await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo+"/contents/.github/workflows/build-apk.yml?ref=main");
     const spec=await askGemini(creds.geminiKey,job.prompt);
     const pkg=cleanPackage(spec.packageName), name=safeName(spec.appName);
