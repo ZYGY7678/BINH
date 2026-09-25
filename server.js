@@ -72,6 +72,14 @@ async function github(token, endpoint, options={}) {
 }
 
 async function askGemini(key, userPrompt) {
+  if(process.env.E2E_SMOKE_ENABLED==="1" && key==="E2E_TEST") {
+    return {
+      appName:"E2E Test App",
+      packageName:"com.zygy.e2etest",
+      summary:"Deterministic end-to-end test app.",
+      files:[{path:"app/src/main/java/MainActivity.kt",content:`package com.zygy.e2etest\n\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.material3.MaterialTheme\nimport androidx.compose.material3.Surface\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.Composable\n\nclass MainActivity : ComponentActivity() {\n  override fun onCreate(state: Bundle?) {\n    super.onCreate(state)\n    setContent { App() }\n  }\n}\n\n@Composable\nfun App() {\n  MaterialTheme {\n    Surface { Text("E2E test OK") }\n  }\n}\n`}]
+    };
+  }
   if(!key) throw new Error("חסר Gemini API Key");
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(MODEL)+":generateContent?key="+encodeURIComponent(key);
   const system=[
