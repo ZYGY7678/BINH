@@ -35,7 +35,34 @@ async function poll(id){
     if(d.status==="ready"){
       clearInterval(timer);buildBtn.disabled=false;
       $("#jobTitle").textContent=d.appName||"האפליקציה מוכנה";
-      $("#jobResult").innerHTML='<div class="success"><div class="result-title">✓ ה־APK מוכן</div><div class="result-meta">'+(d.packageName||"")+'</div><button id="download" class="download">הורד APK</button>'+(d.runUrl?' <a class="download" target="_blank" rel="noopener" href="'+d.runUrl+'">GitHub Actions</a>':'')+'</div>';
+      const result=document.createElement("div");
+      result.className="success";
+      const title=document.createElement("div");
+      title.className="result-title";
+      title.textContent="✓ ה־APK מוכן";
+      const meta=document.createElement("div");
+      meta.className="result-meta";
+      meta.textContent=d.packageName||"";
+      const downloadButton=document.createElement("button");
+      downloadButton.id="download";
+      downloadButton.className="download";
+      downloadButton.textContent="הורד APK";
+      result.append(title,meta,downloadButton);
+      if(d.runUrl){
+        try{
+          const runUrl=new URL(d.runUrl);
+          if(runUrl.protocol==="https:"&&runUrl.hostname==="github.com"){
+            const link=document.createElement("a");
+            link.className="download";
+            link.target="_blank";
+            link.rel="noopener";
+            link.href=runUrl.href;
+            link.textContent="GitHub Actions";
+            result.append(document.createTextNode(" "),link);
+          }
+        }catch{}
+      }
+      $("#jobResult").replaceChildren(result);
       $("#download").onclick=async()=>{
         try{
           const cc=cfg();
@@ -62,7 +89,16 @@ async function poll(id){
     }else if(d.status==="failed"){
       clearInterval(timer);buildBtn.disabled=false;
       $("#jobTitle").textContent="הבנייה נכשלה";
-      $("#jobResult").innerHTML='<div class="error"><div class="result-title">הקומפילציה נכשלה</div><div class="result-meta">'+(d.error||"שגיאה לא ידועה")+'</div></div>';
+      const result=document.createElement("div");
+      result.className="error";
+      const title=document.createElement("div");
+      title.className="result-title";
+      title.textContent="הקומפילציה נכשלה";
+      const meta=document.createElement("div");
+      meta.className="result-meta";
+      meta.textContent=d.error||"שגיאה לא ידועה";
+      result.append(title,meta);
+      $("#jobResult").replaceChildren(result);
       if(d.logs){$("#logsBox").classList.remove("hidden");$("#logs").textContent=d.logs}
     }
   }catch(e){
@@ -75,7 +111,7 @@ async function poll(id){
     }
   }
 }
-buildBtn.onclick=async()=>{const c=cfg();if(!c.githubToken||!c.geminiKey){dialog.showModal();return}const p=promptEl.value.trim();if(p.length<5){promptEl.focus();return}buildBtn.disabled=true;$("#jobPanel").classList.remove("hidden");$("#jobTitle").textContent="בונה את האפליקציה…";$("#jobResult").innerHTML="";$("#logsBox").classList.add("hidden");stage("queued");try{
+buildBtn.onclick=async()=>{const c=cfg();if(!c.githubToken||!c.geminiKey){dialog.showModal();return}const p=promptEl.value.trim();if(p.length<5){promptEl.focus();return}clearInterval(timer);timer=null;buildBtn.disabled=true;$("#jobPanel").classList.remove("hidden");$("#jobTitle").textContent="בונה את האפליקציה…";$("#jobResult").innerHTML="";$("#logsBox").classList.add("hidden");stage("queued");try{
   const r=await fetch("/api/build",{
     method:"POST",
     cache:"no-store",
