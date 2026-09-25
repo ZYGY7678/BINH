@@ -4,7 +4,7 @@ on:
     branches:
       - 'builder/**'
     paths:
-      - 'builds/**/.build-trigger'
+      - '.build-trigger'
   workflow_dispatch:
     inputs:
       project_id:
@@ -23,6 +23,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
+          ref: ${{ github.ref }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
