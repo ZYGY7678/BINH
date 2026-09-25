@@ -12,7 +12,6 @@ const HOST = "0.0.0.0";
 const DEFAULT_OWNER = process.env.GITHUB_OWNER || "ZYGY7678";
 const DEFAULT_REPO = process.env.GITHUB_REPO || "BINH";
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-const E2E_SMOKE_ENABLED = process.env.E2E_SMOKE_ENABLED === "1";
 const jobs = new Map();
 
 function send(res, code, body, headers={}) {
@@ -70,18 +69,6 @@ async function github(token, endpoint, options={}) {
     }
   }
   throw lastError||new Error("GitHub request failed");
-}
-
-function smokeSpec(){
-  return {
-    appName:"AI Builder E2E Smoke Test",
-    packageName:"com.example.e2esmoke",
-    summary:"Deterministic end-to-end smoke-test app for the real Build APK button.",
-    files:[{
-      path:"app/src/main/java/com/example/e2esmoke/MainActivity.kt",
-      content:`package com.example.e2esmoke\\n\\nimport android.os.Bundle\\nimport androidx.activity.ComponentActivity\\nimport androidx.activity.compose.setContent\\nimport androidx.compose.material3.MaterialTheme\\nimport androidx.compose.material3.Surface\\nimport androidx.compose.material3.Text\\nimport androidx.compose.runtime.Composable\\n\\nclass MainActivity: ComponentActivity(){ override fun onCreate(state: Bundle?){ super.onCreate(state); setContent{ App() } } }\\n@Composable fun App(){ MaterialTheme{ Surface{ Text("E2E OK") } } }\\n`
-    }]
-  };
 }
 
 async function askGemini(key, userPrompt) {
@@ -296,9 +283,9 @@ async function startJob(job,creds){
     job.status="generating"; job.stage="AI מתכנן וכותב את האפליקציה";
     const repo=await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo);
     if(repo.archived) throw new Error("המאגר ב-GitHub בארכיון");
-    if(!job.e2e && repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
+    if(repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
     await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo+"/contents/.github/workflows/build-apk.yml?ref=main");
-    const spec=(job.e2e&&E2E_SMOKE_ENABLED)?smokeSpec():await askGemini(creds.geminiKey,job.prompt);
+    const spec=await askGemini(creds.geminiKey,job.prompt);
     const pkg=cleanPackage(spec.packageName), name=safeName(spec.appName);
     const map=new Map(fixedFiles(job.id,name,pkg).map(x=>[x.path,x]));
     for(const f of sanitizeFiles(job.id,spec,pkg)) map.set(f.path,f);
@@ -319,7 +306,7 @@ async function startJob(job,creds){
 }
 async function route(req,res){
   const u=new URL(req.url,"http://localhost");
-  if(req.method==="GET"&&u.pathname==="/api/health") return json(res,200,{ok:true,model:MODEL,repo:DEFAULT_OWNER+"/"+DEFAULT_REPO,e2eSmoke:E2E_SMOKE_ENABLED});
+  if(req.method==="GET"&&u.pathname==="/api/health") return json(res,200,{ok:true,model:MODEL,repo:DEFAULT_OWNER+"/"+DEFAULT_REPO});
   if(req.method==="POST"&&u.pathname==="/api/validate"){
     try{
       const b=await readBody(req), owner=b.owner||DEFAULT_OWNER, repo=b.repo||DEFAULT_REPO;
@@ -332,8 +319,7 @@ async function route(req,res){
       const b=await readBody(req), prompt=String(b.prompt||"").trim();
       if(prompt.length<5) throw new Error("כתוב פקודה מפורטת יותר");
       const id=crypto.randomUUID().slice(0,8);
-      const e2e=b.e2e===true&&E2E_SMOKE_ENABLED;
-      const job={id,prompt,owner:b.owner||DEFAULT_OWNER,repo:b.repo||DEFAULT_REPO,e2e,status:"queued",stage:"מתכונן",createdAt:Date.now()};
+      const job={id,prompt,owner:b.owner||DEFAULT_OWNER,repo:b.repo||DEFAULT_REPO,status:"queued",stage:"מתכונן",createdAt:Date.now()};
       jobs.set(id,job);
       void startJob(job,{githubToken:String(b.githubToken||""),geminiKey:String(b.geminiKey||"")});
       return json(res,202,{ok:true,jobId:id});
