@@ -1,10 +1,5 @@
 name: Build APK
 on:
-  push:
-    branches:
-      - 'builder/**'
-    paths:
-      - 'builds/**/.build-trigger'
   workflow_dispatch:
     inputs:
       project_id:
