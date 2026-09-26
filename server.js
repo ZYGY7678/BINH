@@ -361,19 +361,23 @@ async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRun
 }
 async function downloadArtifactZip(token,owner,repo,artifactId){
   let lastError;
+  const api="https://api.github.com/repos/"+owner+"/"+repo+"/actions/artifacts/"+artifactId+"/zip";
   for(let attempt=0;attempt<3;attempt++){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),60000);
     try{
-      const r=await fetch("https://api.github.com/repos/"+owner+"/"+repo+"/actions/artifacts/"+artifactId+"/zip",{
-        signal:controller.signal,
-        headers:{
-          "accept":"application/vnd.github+json",
-          "authorization":"Bearer "+token,
-          "x-github-api-version":"2022-11-28",
-          "user-agent":"AI-App-Builder/1.0"
-        }
-      });
+      const h={
+        "accept":"application/vnd.github+json",
+        "authorization":"Bearer "+token,
+        "x-github-api-version":"2022-11-28",
+        "user-agent":"AI-App-Builder/1.0"
+      };
+      let r=await fetch(api,{signal:controller.signal,redirect:"manual",headers:h});
+      if(r.status>=300&&r.status<400){
+        const location=r.headers.get("location");
+        if(!location) throw new Error("Artifact redirect missing Location header");
+        r=await fetch(location,{signal:controller.signal,headers:{"user-agent":"AI-App-Builder/1.0"}});
+      }
       const t=r.ok?null:await r.text();
       clearTimeout(timer);
       if(!r.ok){
