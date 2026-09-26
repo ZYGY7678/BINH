@@ -39,7 +39,6 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-I
 fun HelloScreen() {
     var message by remember { mutableStateOf("") }
 
