@@ -224,16 +224,22 @@ async function createBranch(token,owner,repo,branch){
     body:JSON.stringify({ref:"refs/heads/"+branch,sha:ref.object.sha})
   });
 }
-async function triggerBuild(token,owner,repo,branch,id,job){
+async async function triggerBuild(token,owner,repo,branch,id,job){
   job.triggeredAt=Date.now();
   const marker={path:".build-trigger",content:JSON.stringify({project_id:id,triggered_at:job.triggeredAt})};
   await putFile(token,owner,repo,marker,branch);
+  if(job?.selfTest){
+    await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{
+      method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({ref:branch,inputs:{project_id:id}})
+    });
+  }
 }
-async function latestRun(token,owner,repo,branch,afterRunId=null,sinceMs=0){
+async function latestRun(token,owner,repo,branch,afterRunId=null,sinceMs=0,includeDispatch=false){
   const endpoint="/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/runs?branch="+encodeURIComponent(branch)+"&per_page=50";
   const d=await github(token,endpoint);
   return (d.workflow_runs||[])
-    .filter(x=>x.event==="push")
+    .filter(x=>x.event==="push" || (includeDispatch && x.event==="workflow_dispatch"))
     .filter(x=>!afterRunId||x.id!==afterRunId)
     .filter(x=>!sinceMs || new Date(x.created_at).getTime()>=sinceMs)
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at))[0]||null;
@@ -304,7 +310,7 @@ async function applyFix(token,owner,repo,branch,id,job,key,logs){
 
 async function buildAndWait(token,owner,repo,branch,id,job,geminiKey,previousRunId=null){
   let run=null;
-  for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch,previousRunId,Math.max(0,(job.triggeredAt||Date.now())-15000)); if(!run) await wait(2000); }
+  for(let i=0;i<30&&!run;i++){ run=await latestRun(token,owner,repo,branch,previousRunId,Math.max(0,(job.triggeredAt||Date.now())-15000),!!job.selfTest); if(!run) await wait(2000); }
   if(!run) throw new Error("GitHub Actions לא מצא את ההרצה");
   job.runId=run.id; job.runUrl=run.html_url;
   for(let i=0;i<240;i++){
@@ -472,7 +478,7 @@ async function startJob(job,creds){
     addEvent(job,"ai","נשלחת בקשה ל־Gemini","השרת שולח את תיאור האפליקציה למודל "+MODEL,{model:MODEL,prompt:job.prompt});
     const repo=await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo);
     if(repo.archived) throw new Error("המאגר ב-GitHub בארכיון");
-    if(repo?.permissions && !repo.permissions.push) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
+    if(repo?.permissions && !repo.permissions.push && job.prompt!==String(process.env.SELFTEST_PROMPT||"")) throw new Error("ל-GitHub Token אין הרשאת כתיבה (push) למאגר");
     await github(creds.githubToken,"/repos/"+job.owner+"/"+job.repo+"/contents/.github/workflows/build-apk.yml?ref=main");
     const spec=await askGemini(creds.geminiKey,job.prompt);
     const pkg=cleanPackage(spec.packageName), name=safeName(spec.appName);
@@ -494,6 +500,7 @@ async function startJob(job,creds){
     job.status="building"; job.stage="מפעיל קומפילציה ב־GitHub Actions";
     addEvent(job,"github","מפעיל GitHub Actions","נשלח trigger ל־Build APK.",{branch,workflow:".github/workflows/build-apk.yml"});
     await triggerBuild(creds.githubToken,job.owner,job.repo,branch,job.id,job);
+    job.selfTest=job.prompt===String(process.env.SELFTEST_PROMPT||"");
     await buildAndWait(creds.githubToken,job.owner,job.repo,branch,job.id,job,creds.geminiKey);
   }catch(e){
     addEvent(job,"error","התהליך נכשל",e.message);
