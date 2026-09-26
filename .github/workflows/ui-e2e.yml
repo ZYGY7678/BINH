@@ -37,7 +37,7 @@ jobs:
           await page.locator('#geminiKey').fill('__SELFTEST__');
           await page.locator('#owner').fill('ZYGY7678');
           await page.locator('#repo').fill('BINH');
-          await page.locator('#settingsForm button[type="submit"]').click();
+          await page.locator('#settingsForm .primary').click();
           await page.waitForTimeout(500);
           if((await page.locator('#connectionPill').textContent())!=='מחובר') throw new Error('Connection UI did not become מחובר');
           await page.locator('#testBtn').click();
