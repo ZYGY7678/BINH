@@ -25,7 +25,7 @@ jobs:
           SELFTEST_TOKEN: st-uAs-XX9Whb3aiCN8Ci3ks6QVVeRkM3c0
         run: |
           node <<'NODE'
-          const { chromium } = require('playwright');
+          (async()=>{ const { chromium } = require('playwright');
           const base = 'https://ai-app-builder-qa64.onrender.com';
           const prompt = 'צור אפליקציית בדיקה פשוטה עם מסך אחד וכפתור שלום';
           const browser = await chromium.launch({headless:true});
@@ -85,4 +85,5 @@ jobs:
             if(status==='נכשל') throw new Error('Build failed in UI: '+last);
           }
           throw new Error('Timed out: '+last);
+          })().catch(e=>{ console.error(e.stack||e); process.exit(1); });
           NODE
