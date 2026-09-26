@@ -70,14 +70,16 @@ jobs:
               const countNum=parseInt((count||'0').replace(/[^0-9]/g,''),10)||0;
               if(!saw.has('gemini-request')||!saw.has('gemini-response')||!saw.has('branch')||!saw.has('upload')||!saw.has('actions')||!saw.has('apk')) throw new Error('Timeline missing stages: '+JSON.stringify([...saw]));
               if(countNum<7) throw new Error('Too few timeline events: '+countNum);
-              const dlPromise=page.waitForEvent('download',{timeout:60000});
+              const dlResponse=page.waitForResponse(r=>r.url().includes('/api/build/')&&r.url().endsWith('/download')&&r.request().method()==='GET',{timeout:60000});
               await page.locator('#download').click();
-              const dl=await dlPromise;
-              const path=await dl.path();
-              const fs=require('fs');
-              const size=fs.statSync(path).size;
+              const rr=await dlResponse;
+              if(!rr.ok()) throw new Error('APK download HTTP '+rr.status());
+              const body=await rr.body();
+              const size=body.length;
+              const ct=rr.headers()['content-type']||'';
+              if(!ct.includes('application/vnd.android.package-archive')) throw new Error('Unexpected APK content-type: '+ct);
               if(size<1024*1024) throw new Error('APK too small: '+size);
-              console.log('UI_E2E_OK '+JSON.stringify({status,count,last,timelineStages:[...saw],apkBytes:size,url:base}));
+              console.log('UI_E2E_OK '+JSON.stringify({status,count,last,timelineStages:[...saw],apkBytes:size,contentType:ct,url:base}));
               await browser.close();
               process.exit(0);
             }
