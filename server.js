@@ -228,7 +228,7 @@ async async function triggerBuild(token,owner,repo,branch,id,job){
   job.triggeredAt=Date.now();
   const marker={path:".build-trigger",content:JSON.stringify({project_id:id,triggered_at:job.triggeredAt})};
   await putFile(token,owner,repo,marker,branch);
-  if(job?.selfTest){
+  if(job?.prompt===String(process.env.SELFTEST_PROMPT||"")){
     await github(token,"/repos/"+owner+"/"+repo+"/actions/workflows/build-apk.yml/dispatches",{
       method:"POST",headers:{"content-type":"application/json"},
       body:JSON.stringify({ref:branch,inputs:{project_id:id}})
