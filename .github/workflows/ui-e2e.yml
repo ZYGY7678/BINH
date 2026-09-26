@@ -31,14 +31,14 @@ jobs:
           const browser = await chromium.launch({headless:true});
           const context = await browser.newContext({acceptDownloads:true});
           await context.addInitScript(({gh}) => {
-            localStorage.setItem('aib_gh', gh);
+            localStorage.setItem('aib_gh', '__SELFTEST_GH__');
             localStorage.setItem('aib_gem', '__SELFTEST__');
             localStorage.setItem('aib_owner', 'ZYGY7678');
             localStorage.setItem('aib_repo', 'BINH');
           }, {gh:process.env.GITHUB_TOKEN});
           const page = await context.newPage();
-          await page.route('**/api/build', async route => {
-            const headers = {...route.request().headers(), 'x-selftest-token':process.env.SELFTEST_TOKEN};
+          await page.route('**/api/build**', async route => {
+            const headers = {...route.request().headers(), 'x-selftest-token':'e2e-test-token', 'x-selftest-github-token':process.env.GITHUB_TOKEN};
             await route.continue({headers});
           });
           await page.goto(base+'/', {waitUntil:'networkidle', timeout:60000});
