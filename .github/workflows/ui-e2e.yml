@@ -1,0 +1,82 @@
+name: UI E2E Verification B
+on:
+  push:
+    branches:
+      - 'e2e/**'
+permissions:
+  contents: write
+  actions: write
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Run browser E2E
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node <<'NODE'
+          const { chromium } = await import('playwright');
+          const base = 'https://ai-app-builder-qa64.onrender.com';
+          const prompt = 'E2E-20260926-Create a tiny Android test app with one screen and a Hello button';
+          const browser = await chromium.launch({headless:true});
+          const context = await browser.newContext({acceptDownloads:true});
+          await context.addInitScript(({gh}) => {
+            localStorage.setItem('aib_gh', gh);
+            localStorage.setItem('aib_gem', '__SELFTEST__');
+            localStorage.setItem('aib_owner', 'ZYGY7678');
+            localStorage.setItem('aib_repo', 'BINH');
+          }, {gh:process.env.GITHUB_TOKEN});
+          const page = await context.newPage();
+          await page.goto(base+'/', {waitUntil:'networkidle', timeout:60000});
+          await page.locator('#settingsBtn').click();
+          await page.locator('#closeSettings').click();
+          await page.locator('#prompt').fill(prompt);
+          await page.locator('#buildBtn').click();
+          await page.locator('#jobPanel').waitFor({state:'visible', timeout:30000});
+          const saw = new Set();
+          const deadline = Date.now()+20*60*1000;
+          let last='';
+          while(Date.now()<deadline){
+            await page.waitForTimeout(5000);
+            const status=await page.locator('#jobStatus').textContent();
+            const subtitle=await page.locator('#jobSubtitle').textContent();
+            const count=await page.locator('#eventCount').textContent();
+            const texts=await page.locator('#timeline').locator('.event').allTextContents();
+            last=[...texts,status,subtitle,count].join(' | ');
+            for(const t of texts){
+              if(t.includes('נשלחת בקשה ל־Gemini')) saw.add('gemini-request');
+              if(t.includes('Gemini החזיר תשובה')) saw.add('gemini-response');
+              if(t.includes('נוצר ענף GitHub')) saw.add('branch');
+              if(t.includes('מעלה קבצים ל־GitHub')) saw.add('upload');
+              if(t.includes('מפעיל GitHub Actions')) saw.add('actions');
+              if(t.includes('GitHub Actions בבנייה')) saw.add('build');
+              if(t.includes('ה־APK מוכן')) saw.add('apk');
+            }
+            if(status==='מוכן'){
+              const countNum=parseInt((count||'0').replace(/[^0-9]/g,''),10)||0;
+              if(!['gemini-request','gemini-response','branch','upload','actions','apk'].every(x=>saw.has(x))) throw new Error('Timeline missing stages: '+JSON.stringify([...saw]));
+              if(countNum<7) throw new Error('Too few timeline events: '+countNum);
+              const dlPromise=page.waitForEvent('download',{timeout:60000});
+              await page.locator('#download').click();
+              const dl=await dlPromise;
+              const path=await dl.path();
+              const fs=require('fs');
+              const size=fs.statSync(path).size;
+              if(size<1024*1024) throw new Error('APK too small: '+size);
+              console.log('UI_E2E_OK '+JSON.stringify({status,count,timelineStages:[...saw],apkBytes:size}));
+              await browser.close();
+              process.exit(0);
+            }
+            if(status==='נכשל') throw new Error('Build failed in UI: '+last);
+          }
+          throw new Error('Timed out: '+last);
+          NODE
