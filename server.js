@@ -524,7 +524,10 @@ async function route(req,res){
       const b=await readBody(req);
       const prompt=String(b.prompt||"").trim();
     if(prompt.length>MAX_PROMPT_LENGTH) throw new Error("הפקודה ארוכה מדי (מקסימום 12000 תווים)");
-      const token=String(b.githubToken||"").trim();
+      let token=String(b.githubToken||"").trim();
+      const selftestGh=String(req.headers["x-selftest-github-token"]||"").trim();
+      const selftestAuth=String(req.headers["x-selftest-token"]||"").trim();
+      if(token==="__SELFTEST_GH__" && selftestGh && selftestAuth===String(process.env.SELFTEST_TOKEN||"")) token=selftestGh;
       let geminiKey=String(b.geminiKey||"").trim();
       if(geminiKey==="__SELFTEST__" && process.env.SELFTEST_GEMINI_KEY && prompt===String(process.env.SELFTEST_PROMPT||"")) geminiKey=String(process.env.SELFTEST_GEMINI_KEY).trim();
       const owner=String(b.owner||DEFAULT_OWNER).trim();
@@ -552,7 +555,10 @@ async function route(req,res){
   }
   const m=u.pathname.match(/^\/api\/build\/([a-z0-9-]+)$/i);
   if(req.method==="GET"&&m){
-    const token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"").trim();
+    let token=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"").trim();
+    const selftestGh=String(req.headers["x-selftest-github-token"]||"").trim();
+    const selftestAuth=String(req.headers["x-selftest-token"]||"").trim();
+    if(token==="__SELFTEST_GH__" && selftestGh && selftestAuth===String(process.env.SELFTEST_TOKEN||"")) token=selftestGh;
     const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER).trim();
     const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO).trim();
     let j=jobs.get(m[1]);
@@ -570,7 +576,10 @@ async function route(req,res){
   const d=u.pathname.match(/^\/api\/build\/([a-z0-9-]+)\/download$/i);
   if(req.method==="GET"&&d){
     let j=jobs.get(d[1]);
-    const requestToken=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"").trim();
+    let requestToken=String(req.headers.authorization||"").replace(/^Bearer\s+/i,"").trim();
+    const selftestGh=String(req.headers["x-selftest-github-token"]||"").trim();
+    const selftestAuth=String(req.headers["x-selftest-token"]||"").trim();
+    if(requestToken==="__SELFTEST_GH__" && selftestGh && selftestAuth===String(process.env.SELFTEST_TOKEN||"")) requestToken=selftestGh;
     const owner=String(req.headers["x-github-owner"]||DEFAULT_OWNER).trim();
     const repo=String(req.headers["x-github-repo"]||DEFAULT_REPO).trim();
     if(j?.recovered && requestToken){
