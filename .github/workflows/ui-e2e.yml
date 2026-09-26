@@ -82,6 +82,25 @@ jobs:
               const rr=await dlResponse;
               if(!rr.ok()){
                 const errBody=await rr.text().catch(()=> '');
+                console.log('PROD_DOWNLOAD_FAILURE '+JSON.stringify({http:rr.status(),body:errBody.slice(0,1500)}));
+                try{
+                  const {execFileSync}=require('node:child_process');
+                  const fs=require('node:fs');
+                  const endpoint='repos/ZYGY7678/BINH/actions/runs?branch='+encodeURIComponent('builder/'+buildData.jobId)+'&per_page=20';
+                  const runsJson=JSON.parse(execFileSync('gh',['api',endpoint],{encoding:'utf8'}));
+                  const good=(runsJson.workflow_runs||[]).find(x=>x.name==='Build APK'&&x.conclusion==='success')||null;
+                  console.log('DIRECT_GITHUB_RUN '+JSON.stringify({runId:good?.id||null}));
+                  if(good){
+                    const artsJson=JSON.parse(execFileSync('gh',['api','repos/ZYGY7678/BINH/actions/runs/'+good.id+'/artifacts'],{encoding:'utf8'}));
+                    const art=(artsJson.artifacts||[]).find(x=>x.name==='apk-'+buildData.jobId&&!x.expired)||null;
+                    console.log('DIRECT_GITHUB_ARTIFACT '+JSON.stringify({artifactId:art?.id||null}));
+                    if(art){
+                      const out='/tmp/e2e-artifact.zip';
+                      execFileSync('gh',['api','repos/ZYGY7678/BINH/actions/artifacts/'+art.id+'/zip','--output',out]);
+                      console.log('DIRECT_GITHUB_ZIP '+JSON.stringify({bytes:fs.statSync(out).size}));
+                    }
+                  }
+                }catch(diag){ console.log('DIRECT_GITHUB_DIAG_ERROR '+diag.message); }
                 throw new Error('APK download HTTP '+rr.status()+': '+errBody.slice(0,1500));
               }
               const body=await rr.body();
