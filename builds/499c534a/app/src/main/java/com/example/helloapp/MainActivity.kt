@@ -40,7 +40,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-def HelloScreen() {
+fun HelloScreen() {
     var message by remember { mutableStateOf("") }
 
     Column(
