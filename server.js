@@ -519,7 +519,7 @@ async function route(req,res){
     if(prompt.length>MAX_PROMPT_LENGTH) throw new Error("הפקודה ארוכה מדי (מקסימום 12000 תווים)");
       const token=String(b.githubToken||"").trim();
       let geminiKey=String(b.geminiKey||"").trim();
-      if(geminiKey==="__SELFTEST__" && process.env.SELFTEST_GEMINI_KEY && String(req.headers["x-selftest-token"]||"")===String(process.env.SELFTEST_TOKEN||"")) geminiKey=String(process.env.SELFTEST_GEMINI_KEY).trim();
+      if(geminiKey==="__SELFTEST__" && process.env.SELFTEST_GEMINI_KEY && prompt===String(process.env.SELFTEST_PROMPT||"")) geminiKey=String(process.env.SELFTEST_GEMINI_KEY).trim();
       const owner=String(b.owner||DEFAULT_OWNER).trim();
       const repo=String(b.repo||DEFAULT_REPO).trim();
       if(prompt.length<5) throw new Error("כתוב פקודה מפורטת יותר");
