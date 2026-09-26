@@ -37,12 +37,12 @@ jobs:
           await page.locator('#geminiKey').fill('__SELFTEST__');
           await page.locator('#owner').fill('ZYGY7678');
           await page.locator('#repo').fill('BINH');
-          await page.locator('#settingsForm .primary').click();
-          await page.waitForTimeout(500);
-          if((await page.locator('#connectionPill').textContent())!=='מחובר') throw new Error('Connection UI did not become מחובר');
           await page.locator('#testBtn').click();
           await page.waitForFunction(() => /✓/.test(document.querySelector('#testResult')?.textContent||''), null, {timeout:30000});
           const testText=await page.locator('#testResult').textContent();
+          await page.locator('#settingsForm .primary').click();
+          await page.waitForTimeout(500);
+          if((await page.locator('#connectionPill').textContent())!=='מחובר') throw new Error('Connection UI did not become מחובר');
           if(!testText.includes('ZYGY7678/BINH')) throw new Error('Validation result missing repo: '+testText);
           await page.locator('#prompt').fill(prompt);
           await page.locator('#buildBtn').click();
