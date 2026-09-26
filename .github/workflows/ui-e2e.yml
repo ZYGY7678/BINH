@@ -22,6 +22,7 @@ jobs:
       - name: Run browser E2E
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          SELFTEST_TOKEN: e2e-test-token
         run: |
           node <<'NODE'
           (async()=>{ const { chromium } = require('playwright');
@@ -37,14 +38,20 @@ jobs:
           }, {gh:process.env.GITHUB_TOKEN});
           const page = await context.newPage();
           await page.route('**/api/build**', async route => {
-            const headers = {...route.request().headers(), 'x-selftest-token':'e2e-test-token', 'x-selftest-github-token':process.env.GITHUB_TOKEN};
+            const headers = {...route.request().headers(), 'x-selftest-token':process.env.SELFTEST_TOKEN, 'x-selftest-github-token':process.env.GITHUB_TOKEN};
             await route.continue({headers});
           });
           await page.goto(base+'/', {waitUntil:'networkidle', timeout:60000});
           await page.locator('#settingsBtn').click();
           await page.locator('#closeSettings').click();
           await page.locator('#prompt').fill(prompt);
+          const buildResponsePromise=page.waitForResponse(r=>r.url().endsWith('/api/build')&&r.request().method()==='POST',{timeout:30000});
           await page.locator('#buildBtn').click();
+          const buildResponse=await buildResponsePromise;
+          const buildText=await buildResponse.text();
+          if(!buildResponse.ok()) throw new Error('Build API HTTP '+buildResponse.status()+': '+buildText.slice(0,1000));
+          let buildData; try{buildData=JSON.parse(buildText)}catch(e){throw new Error('Build API returned invalid JSON: '+buildText.slice(0,1000))}
+          if(!buildData.jobId) throw new Error('Build API did not return jobId');
           await page.locator('#jobPanel').waitFor({state:'visible', timeout:30000});
           const saw = new Set();
           const deadline = Date.now()+20*60*1000;
@@ -73,7 +80,10 @@ jobs:
               const dlResponse=page.waitForResponse(r=>r.url().includes('/api/build/')&&r.url().endsWith('/download')&&r.request().method()==='GET',{timeout:60000});
               await page.locator('#download').click();
               const rr=await dlResponse;
-              if(!rr.ok()) throw new Error('APK download HTTP '+rr.status());
+              if(!rr.ok()){
+                const errBody=await rr.text().catch(()=> '');
+                throw new Error('APK download HTTP '+rr.status()+': '+errBody.slice(0,1500));
+              }
               const body=await rr.body();
               const size=body.length;
               const ct=rr.headers()['content-type']||'';
