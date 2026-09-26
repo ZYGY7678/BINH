@@ -22,7 +22,6 @@ jobs:
       - name: Run browser E2E
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          SELFTEST_TOKEN: st-uAs-XX9Whb3aiCN8Ci3ks6QVVeRkM3c0
         run: |
           node <<'NODE'
           (async()=>{ const { chromium } = require('playwright');
