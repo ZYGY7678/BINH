@@ -96,8 +96,12 @@ jobs:
                     console.log('DIRECT_GITHUB_ARTIFACT '+JSON.stringify({artifactId:art?.id||null}));
                     if(art){
                       const out='/tmp/e2e-artifact.zip';
-                      execFileSync('gh',['api','repos/ZYGY7678/BINH/actions/artifacts/'+art.id+'/zip','--output',out]);
-                      console.log('DIRECT_GITHUB_ZIP '+JSON.stringify({bytes:fs.statSync(out).size}));
+                      try{
+                        execFileSync('gh',['api','repos/ZYGY7678/BINH/actions/artifacts/'+art.id+'/zip','--output',out]);
+                        console.log('DIRECT_GITHUB_ZIP '+JSON.stringify({bytes:fs.statSync(out).size}));
+                      }catch(e){
+                        console.log('DIRECT_GITHUB_ZIP_FAILURE '+JSON.stringify({code:e.status||null,stdout:String(e.stdout||'').slice(0,2000),stderr:String(e.stderr||'').slice(0,2000)}));
+                      }
                     }
                   }
                 }catch(diag){ console.log('DIRECT_GITHUB_DIAG_ERROR '+diag.message); }
