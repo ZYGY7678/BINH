@@ -224,7 +224,7 @@ async function createBranch(token,owner,repo,branch){
     body:JSON.stringify({ref:"refs/heads/"+branch,sha:ref.object.sha})
   });
 }
-async async function triggerBuild(token,owner,repo,branch,id,job){
+async function triggerBuild(token,owner,repo,branch,id,job){
   job.triggeredAt=Date.now();
   const marker={path:".build-trigger",content:JSON.stringify({project_id:id,triggered_at:job.triggeredAt})};
   await putFile(token,owner,repo,marker,branch);
