@@ -95,10 +95,9 @@ jobs:
                     const art=(artsJson.artifacts||[]).find(x=>x.name==='apk-'+buildData.jobId&&!x.expired)||null;
                     console.log('DIRECT_GITHUB_ARTIFACT '+JSON.stringify({artifactId:art?.id||null}));
                     if(art){
-                      const out='/tmp/e2e-artifact.zip';
                       try{
-                        execFileSync('gh',['api','repos/ZYGY7678/BINH/actions/artifacts/'+art.id+'/zip','--output',out]);
-                        console.log('DIRECT_GITHUB_ZIP '+JSON.stringify({bytes:fs.statSync(out).size}));
+                        execFileSync('gh',['api','-i','--silent','repos/ZYGY7678/BINH/actions/artifacts/'+art.id+'/zip'],{encoding:'utf8',maxBuffer:1024*1024});
+                        console.log('DIRECT_GITHUB_ZIP_HEADER_OK');
                       }catch(e){
                         console.log('DIRECT_GITHUB_ZIP_FAILURE '+JSON.stringify({code:e.status||null,stdout:String(e.stdout||'').slice(0,2000),stderr:String(e.stderr||'').slice(0,2000)}));
                       }
