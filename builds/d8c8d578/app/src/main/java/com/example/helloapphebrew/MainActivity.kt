@@ -27,7 +27,6 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-I
 fun HelloScreen() {
     var greetingMessage by remember { mutableStateOf("") }
 
