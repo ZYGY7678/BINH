@@ -373,6 +373,10 @@ async function downloadArtifactZip(token,owner,repo,artifactId){
         "user-agent":"AI-App-Builder/1.0"
       };
       let r=await fetch(api,{signal:controller.signal,redirect:"manual",headers:h});
+      if(r.status===401||r.status===403){
+        const publicRetry=await fetch(api,{signal:controller.signal,redirect:"manual",headers:{"accept":"application/vnd.github+json","x-github-api-version":"2022-11-28","user-agent":"AI-App-Builder/1.0"}});
+        r=publicRetry;
+      }
       if(r.status>=300&&r.status<400){
         const location=r.headers.get("location");
         if(!location) throw new Error("Artifact redirect missing Location header");
